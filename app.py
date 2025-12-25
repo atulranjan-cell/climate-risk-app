@@ -2,17 +2,20 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import ee
+import os
+import json
+from google.oauth2 import service_account
 
 # =================================================
-# 1. INITIALIZE EARTH ENGINE (SERVICE ACCOUNT)
+# 1. INITIALIZE EARTH ENGINE (RENDER-SAFE)
 # =================================================
 
-SERVICE_ACCOUNT = "gee-backend@citric-snow-424111-q0.iam.gserviceaccount.com"
-KEY_FILE = "service_account.json"
+# Load service account JSON from environment variable
+sa_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
 
-credentials = ee.ServiceAccountCredentials(
-    SERVICE_ACCOUNT,
-    KEY_FILE
+credentials = service_account.Credentials.from_service_account_info(
+    sa_info,
+    scopes=["https://www.googleapis.com/auth/earthengine"]
 )
 
 ee.Initialize(
@@ -80,7 +83,7 @@ def nearest_valid_value(lat, lon, field, search_radius_m=100_000):
     return value.getInfo()
 
 # =================================================
-# 6. NEW AQUEDUCT SCORE GENERATOR (ATLAS-ALIGNED)
+# 6. AQUEDUCT SCORE GENERATOR (ATLAS-ALIGNED)
 # =================================================
 
 def get_aqueduct_risks(lat: float, lon: float):
@@ -89,19 +92,10 @@ def get_aqueduct_risks(lat: float, lon: float):
     """
 
     return {
-        # Baseline Water Stress (CATEGORY: 1–5)
         "water_stress_category": nearest_valid_value(lat, lon, "bws_cat"),
-
-        # Drought Risk (0–5)
         "drought_risk_score": nearest_valid_value(lat, lon, "drr_score"),
-
-        # River Flood Risk (0–5)
         "river_flood_risk_score": nearest_valid_value(lat, lon, "rfr_score"),
-
-        # Coastal Flood Risk (0–5)
         "coastal_flood_risk_score": nearest_valid_value(lat, lon, "cfr_score"),
-
-        # Metadata
         "source": "WRI Aqueduct v4 (Atlas-aligned)",
         "units": "0–5 scale (category for water stress)"
     }
