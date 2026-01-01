@@ -381,7 +381,7 @@ def get_fire_cyclone_baselines(geom):
     
     max_wind = tracks.map(clean_wind).aggregate_max('peak_wind')
 
-     with _EE_LOCK:  # Render-safe EE call
+    with _EE_LOCK:  # Render-safe EE call
         return ee.Dictionary({
             'NDVI': ndvi_val,
             'wf_count': wf_count,
@@ -647,4 +647,5 @@ def run_for_point(lat: float, lon: float):
 
 
                                      
+
 
