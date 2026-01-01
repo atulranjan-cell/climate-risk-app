@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import logging
 import numpy as np
 import time
@@ -13,18 +13,16 @@ import json
 import ee
 import tempfile
 
-# =================================================
-# LOGGING
-# =================================================
+# Logging setup
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("climate-api")
+logger = logging.getLogger(__name__)
+# =================================================
+# EARTH ENGINE INITIALIZATION (Render-safe)
+# =================================================
 
-# =================================================
-# EARTH ENGINE INITIALIZATION (RENDER-SAFE)
-# =================================================
 _EE_INITIALIZED = False
 
 def init_ee():
@@ -32,10 +30,9 @@ def init_ee():
     if _EE_INITIALIZED:
         return
 
-    if "GCP_SERVICE_ACCOUNT" not in os.environ:
-        raise RuntimeError("Missing GCP_SERVICE_ACCOUNT environment variable")
-
-    service_account_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
+    service_account_info = json.loads(
+        os.environ["GCP_SERVICE_ACCOUNT"]
+    )
 
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
         json.dump(service_account_info, f)
@@ -52,46 +49,40 @@ def init_ee():
         url="https://earthengine-highvolume.googleapis.com"
     )
 
-    logger.info("🌍 Earth Engine initialized")
+    logger.info("🌍 Earth Engine initialized successfully")
     _EE_INITIALIZED = True
 
-# =================================================
-# FASTAPI LIFESPAN
-# =================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 Climate Hazard API starting")
-    try:
-        init_ee()
-    except Exception as e:
-        logger.exception("❌ Earth Engine init failed")
-        raise RuntimeError("Earth Engine init failed — check Render env vars") from e
+    logger.info(":earth_africa: Climate Hazard API starting...")
     yield
-    logger.info("🛑 Climate Hazard API shutting down")
+    logger.info(":earth_africa: Climate Hazard API shutting down...")
 
-# =================================================
-# RESPONSE MODELS
-# =================================================
+# :white_check_mark: SIMPLIFIED: No Field() validation in models
 class HazardResponse(BaseModel):
     success: bool
-    city: Optional[str]
-    lat: float
-    lon: float
+    city: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
     columns: List[str]
     data: List[Dict[str, Any]]
-    shape: List[int]
+    shape: Tuple[int, int]
+    computation_time_ms: Optional[float] = None
     hazards_count: int
-    computation_time_ms: float
 
 class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "1.0.0"
+    hazards: List[str] = [
+        "Extreme Heat", "Chronic Heat Stress", "Extreme Cold", "Chronic Cold Stress",
+        "Temperature Anomaly", "Precipitation Change", "Extreme Precipitation",
+        "Water Stress", "Drought Risk", "Seasonal Variability", "Interannual Variability",
+        "Riverine Flood Risk", "Coastal Flood Risk", "Wildfire", "Cyclone"
+    ]
 
-# =================================================
-# FASTAPI APP
-# =================================================
 app = FastAPI(
-    title="🌍 Climate Hazard Matrix API",
+    title=":earth_africa: Climate Hazard Matrix API",
+    description="Compute 15+ climate hazard scores for any lat/lon using Google Earth Engine + WRI Aqueduct",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -99,80 +90,76 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount UI only if present (Render-safe)
-if os.path.isdir("static"):
-    app.mount("/ui", StaticFiles(directory="static", html=True), name="static")
+app.mount("/ui", StaticFiles(directory="static", html=True), name="static")
 
-# =================================================
-# ROUTES
-# =================================================
 @app.get("/")
 async def root():
     return {
-        "message": "Climate Hazard Matrix API",
+        "message": ":earth_africa: Climate Hazard Matrix API",
         "endpoints": {
             "health": "/health",
             "run": "/run?lat=25.59&lon=85.14&city=Patna",
             "ui": "/ui",
             "docs": "/docs"
-        }
+        },
+        "example": "GET /run?lat=25.5941&lon=85.1376&city=Patna"
     }
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
     return HealthResponse()
 
+# :white_check_mark: FIXED: Manual validation + NO Field() in query params
 @app.get("/run", response_model=HazardResponse)
 async def run_hazards(lat: float, lon: float, city: Optional[str] = None):
+    """
+    Compute climate hazard matrix for lat/lon
+    """
+    # :white_check_mark: MANUAL VALIDATION (FastAPI native way)
     if not (-90 <= lat <= 90):
-        raise HTTPException(400, "Latitude must be between -90 and 90")
+        raise HTTPException(status_code=400, detail="Latitude must be between -90 and 90")
     if not (-180 <= lon <= 180):
-        raise HTTPException(400, "Longitude must be between -180 and 180")
-
-    start = time.time()
-    logger.info(f"📍 Computing hazards for {lat:.4f}, {lon:.4f}")
-
+        raise HTTPException(status_code=400, detail="Longitude must be between -180 and 180")
+    
     try:
+        init_ee()
+        start_time = time.time()
+        logger.info(f":rocket: Computing hazards for {lat:.4f}, {lon:.4f} ({city or 'unknown'})")
+        
         df = run_for_point(lat, lon)
-
-        # Clean dataframe → JSON safe
-        df = df.replace([np.inf, -np.inf, np.nan], None)
-
+        df = df.replace([float("inf"), float("-inf"), np.nan], None)
+        
+        computation_time = (time.time() - start_time) * 1000
+        
+        logger.info(f":white_check_mark: Hazards computed in {computation_time:.1f}ms | Shape: {df.shape}")
+        
         cols = ["Hazard"] + [c for c in df.columns if c != "Hazard"]
-        records = json.loads(json.dumps(df[cols].to_dict(orient="records")))
-
-        elapsed_ms = (time.time() - start) * 1000
-
+        
+        
         return {
             "success": True,
             "city": city,
-            "lat": float(lat),
-            "lon": float(lon),
+            "lat": lat,
+            "lon": lon,
             "columns": cols,
-            "data": records,
-            "shape": [int(df.shape[0]), int(df.shape[1])],
-            "hazards_count": int(df.shape[0]),
-            "computation_time_ms": round(elapsed_ms, 1)
+            "data": df[cols].to_dict(orient="records"),
+            "shape": df.shape,
+            "hazards_count": df.shape[0],
+            "computation_time_ms": round((time.time() - start_time) * 1000, 1)
         }
-
     except Exception as e:
-        logger.exception("❌ Hazard computation failed")
+        logger.exception(f":x: Hazard computation failed for {lat}, {lon}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.exception_handler(404)
-async def not_found(request: Request, exc):
-    return {"error": "Endpoint not found"}
+async def not_found_handler(request: Request, exc: Exception):
+    return {"error": "Endpoint not found. Try /docs, /ui, /health, or /run?lat=25.59&lon=85.14"}
 
-# =================================================
-# LOCAL RUN
-# =================================================
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000)
-
-
-
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
