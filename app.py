@@ -33,9 +33,9 @@ def init_ee():
         return
 
     if "GEE_SERVICE_ACCOUNT_JSON" not in os.environ:
-        raise RuntimeError("Missing GEE_SERVICE_ACCOUNT_JSON environment variable")
+        raise RuntimeError("Missing GEE_SERVICE_ACCOUNT environment variable")
 
-    service_account_info = json.loads(os.environ["GEE_SERVICE_ACCOUNT_JSON"])
+    service_account_info = json.loads(os.environ["GEE_SERVICE_ACCOUNT"])
 
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
         json.dump(service_account_info, f)
@@ -173,3 +173,4 @@ async def not_found(request: Request, exc):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000)
+
