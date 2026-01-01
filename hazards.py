@@ -127,7 +127,7 @@ def get_full_series(collection_id, geom, start_date, end_date, bands, model=None
         tasks.append((curr.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d')))
         curr = next_step
     dfs = []
-    with concurrent.futures.ThreadPoolExecutor(MAX_WORKERS=6) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(fetch_chunk, collection_id, geom, s, e, bands, model, scenario): (s,e) for s,e in tasks}
         for f in concurrent.futures.as_completed(futures):
             df = f.result()
@@ -295,7 +295,7 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
         all_points[f'{radius//1000}km_S'] = ee.Geometry.Point([lon, lat - delta_lat])
         all_points[f'{radius//1000}km_W'] = ee.Geometry.Point([lon - delta_lon, lat])
 
-    with concurrent.futures.ThreadPoolExecutor(MAX_WORKERS=6) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(sample_nearest_wri, coll, pt, use_baseline_bau30, year, scenario_name):
                    name for name, pt in all_points.items()}
 
@@ -356,7 +356,7 @@ def get_all_wri_parallel(geom):
     all_wri_results = {}
     timings = {}
 
-    with concurrent.futures.ThreadPoolExecutor(MAX_WORKERS=6) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
         futures = {}
         for config_idx, config in enumerate(wri_configs):
             scenario_name, year, scen_name, is_base = config
@@ -435,7 +435,7 @@ def run_for_point(lat: float, lon: float):
     
     # Climate data fetching (parallel)
     climate_start = time.time()
-    with concurrent.futures.ThreadPoolExecutor(MAX_WORKERS=8) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         f1 = executor.submit(get_full_series, "ECMWF/ERA5_LAND/DAILY_AGGR", geom, ERA5_RANGE[0], ERA5_RANGE[1],
                              ['temperature_2m_max', 'temperature_2m_min', 'temperature_2m', 'total_precipitation_sum'])
         f2 = executor.submit(get_full_series, "NASA/GDDP-CMIP6", geom, CMIP6_HIST_RANGE[0], CMIP6_HIST_RANGE[1],
@@ -672,6 +672,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
