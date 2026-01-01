@@ -206,7 +206,8 @@ def sample_nearest_wri(coll, point, use_baseline_bau30, year=None, scenario_name
 
 def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_baseline_bau30=False):
     start_time = time.time()
-    lon, lat = geom.coordinates().getInfo()
+    with _EE_LOCK:  # Render-safe EE call
+        lon, lat = geom.coordinates().getInfo()
 
     if use_baseline_bau30:
         coll = ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/baseline_annual")
@@ -348,9 +349,10 @@ def get_fire_cyclone_baselines(geom):
         .median()
 
     ndvi = landsat.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
-    ndvi_val = ndvi.reduceRegion(
-        ee.Reducer.mean(), geom, 1000, bestEffort=True
-    ).get('NDVI')
+    with _EE_LOCK:  # Render-safe EE call
+        ndvi_val = ndvi.reduceRegion(
+            ee.Reducer.mean(), geom, 1000, bestEffort=True
+        ).get('NDVI')
 
     firms = ee.ImageCollection("FIRMS") \
         .filterBounds(geom) \
@@ -647,5 +649,6 @@ def run_for_point(lat: float, lon: float):
 
 
                                      
+
 
 
