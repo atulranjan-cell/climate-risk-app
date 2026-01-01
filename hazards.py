@@ -33,7 +33,7 @@ CMIP6_HIST_RANGE = ('1960-01-01', '2014-12-31')
 CMIP6_FUT_RANGE = ('2025-01-01', '2085-12-31')
 MODEL = 'MPI-ESM1-2-HR'
 CHUNK_SIZE_YEARS = 12
-MAX_WORKERS = 1
+MAX_WORKERS = 4
 
 # -------------------------------------------------------------------------
 # 1. SPATIAL CLIMATE ENGINE
@@ -264,7 +264,7 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
         all_points[f'{radius//1000}km_S'] = ee.Geometry.Point([lon, lat - delta_lat])
         all_points[f'{radius//1000}km_W'] = ee.Geometry.Point([lon - delta_lon, lat])
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(sample_nearest_wri, coll, pt, use_baseline_bau30, year, scenario_name):
                    name for name, pt in all_points.items()}
 
@@ -325,7 +325,7 @@ def get_all_wri_parallel(geom):
     all_wri_results = {}
     timings = {}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = {}
         for config_idx, config in enumerate(wri_configs):
             scenario_name, year, scen_name, is_base = config
@@ -649,6 +649,7 @@ def run_for_point(lat: float, lon: float):
 
 
                                      
+
 
 
 
