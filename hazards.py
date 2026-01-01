@@ -95,7 +95,8 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
             return ee.Feature(None, stats).set('system:time_start', img.get('system:time_start'))
 
         data_list = coll.map(reduce_to_point).getInfo()['features']
-        if not data_list: return pd.DataFrame()
+        if not data_list:
+            return pd.DataFrame(columns=['date'])
 
         rows = []
         for feat in data_list:
@@ -104,7 +105,12 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
             rows.append(row)
 
         df = pd.DataFrame(rows)
-        df['date'] = pd.to_datetime(df['time'], unit='ms')
+        
+        if 'time' not in df.columns:
+            return pd.DataFrame(columns=['date'])
+        
+        df['date'] = pd.to_datetime(df['time'], unit='ms', errors='coerce')
+        df = df.dropna(subset=['date'])
 
         for b in ['temperature_2m', 'temperature_2m_max', 'temperature_2m_min', 'tas', 'tasmax', 'tasmin']:
             if b in df.columns:
@@ -132,8 +138,16 @@ def get_full_series(collection_id, geom, start_date, end_date, bands, model=None
         for f in concurrent.futures.as_completed(futures):
             df = f.result()
             if not df.empty: dfs.append(df)
-    if not dfs: return pd.DataFrame()
-    return pd.concat(dfs).sort_values('date').reset_index(drop=True)
+    if not dfs:
+        return pd.DataFrame(columns=['date'])
+    
+    df = pd.concat(dfs).sort_values('date').reset_index(drop=True)
+    
+    if 'date' not in df.columns or df.empty:
+        return pd.DataFrame(columns=['date'])
+    
+    return df
+
 
 def score(val, min_v, max_v, inverted=False):
     if pd.isna(val): return np.nan
@@ -480,7 +494,17 @@ def run_for_point(lat: float, lon: float):
     )
 
     # ERA5 processing
-    era5 = datasets['era5']; era5['year'] = era5['date'].dt.year
+    era5 = datasets['era5']
+
+    if era5.empty or 'date' not in era5.columns:
+        logging.error("ERA5 dataset empty or missing date column")
+        return pd.DataFrame([{
+            "Hazard": "Data unavailable",
+            "Observed_2024": None
+        }])
+    
+    era5['year'] = era5['date'].dt.year
+
     era5_base = era5[(era5['date'] >= '1960-01-01') & (era5['date'] <= '2014-12-31')]
     era5_temp_base = era5_base['temperature_2m'].mean()
     era5_pr_base = era5_base.groupby(era5_base['date'].dt.year)['pr'].sum().mean() or 1.0
@@ -672,6 +696,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
