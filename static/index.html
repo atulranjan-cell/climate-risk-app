@@ -18,8 +18,8 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
+/* ================= GLOBAL ================= */
 * { box-sizing: border-box; }
-
 body {
   margin: 0;
   font-family: "Inter", sans-serif;
@@ -32,78 +32,90 @@ nav {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 18px 32px;
+  padding: 14px 20px;
 }
-nav .logo { font-weight: 700; font-size: 20px; }
-nav a {
+nav .logo {
+  font-weight: 700;
+  font-size: 18px;
+}
+nav .links a {
   color: #c7d2fe;
-  margin-left: 24px;
+  margin-left: 18px;
   text-decoration: none;
   font-weight: 600;
 }
-nav a:hover { color: #fff; }
+nav .links a:hover { color: #fff; }
 
 /* ================= HERO ================= */
 .hero {
   text-align: center;
-  padding: 60px 16px 32px;
+  padding: 40px 16px 20px;
 }
-.hero h1 { font-size: 42px; margin-bottom: 10px; }
-.hero p { font-size: 18px; color: #cbd5f5; }
+.hero h1 {
+  font-size: clamp(26px, 4vw, 40px);
+  margin-bottom: 6px;
+}
+.hero p {
+  font-size: clamp(14px, 2.5vw, 18px);
+  color: #cbd5f5;
+}
 
 /* ================= CARD ================= */
 .card {
   max-width: 1200px;
-  margin: 28px auto;
+  margin: 20px auto;
   background: #ffffff;
   color: #111827;
   border-radius: 16px;
-  padding: 26px;
+  padding: 20px;
   box-shadow: 0 25px 50px rgba(0,0,0,0.25);
 }
 
 /* ================= MAP ================= */
 #map {
-  height: 420px;
+  height: min(60vh, 420px);
   border-radius: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 /* ================= CONTROLS ================= */
 .controls {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.controls input,
-.controls button {
-  padding: 14px;
-  font-size: 16px;
-  border-radius: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
 }
 .controls input {
+  padding: 11px;
+  border-radius: 8px;
   border: 1px solid #d1d5db;
-  width: 180px;
+  font-size: 15px;
+}
+.controls input[readonly] {
+  background: #f3f4f6;
 }
 .controls button {
+  grid-column: span 2;
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
   color: white;
   border: none;
+  border-radius: 10px;
+  padding: 12px;
   font-weight: 700;
   cursor: pointer;
-  min-height: 44px;
 }
 .controls button:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* ================= STATUS ================= */
 #status {
-  margin-top: 16px;
-  padding: 12px;
-  border-radius: 10px;
-  font-weight: 600;
   display: none;
+  padding: 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  margin-top: 10px;
 }
 .loading { background:#fef3c7; color:#92400e; }
 .error   { background:#fee2e2; color:#991b1b; }
@@ -114,30 +126,24 @@ nav a:hover { color: #fff; }
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.65);
+  background: rgba(0,0,0,0.6);
   backdrop-filter: blur(4px);
-  z-index: 999;
+  z-index: 9999;
   overflow-y: auto;
-  padding-bottom: env(safe-area-inset-bottom);
 }
 .modal-content {
   background: white;
   color: #111827;
-  width: 94%;
-  max-width: 1200px;
-  margin: 6vh auto;
+  width: min(96%, 1200px);
+  margin: 5vh auto;
   border-radius: 16px;
-  padding: 24px;
+  padding: 20px;
 }
-.modal-close {
-  float: right;
-  font-size: 20px;
-  background: none;
-  border: none;
-  cursor: pointer;
+.modal-content h3 {
+  margin-top: 0;
 }
 
-/* ================= TABLE (DESKTOP) ================= */
+/* ================= TABLE ================= */
 table.dataTable {
   font-family: "IBM Plex Mono", monospace;
   font-size: 13px;
@@ -149,69 +155,41 @@ table.dataTable {
 .color-1 { background:#dbeafe }
 .color-0 { background:#f9fafb }
 
-/* ================= MOBILE RESULT CARDS ================= */
-.mobile-cards { display: none; }
-.card-row {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 12px;
-  margin-bottom: 10px;
-}
-.card-row h4 {
-  margin: 0 0 8px;
-}
-
 /* ================= FOOTER ================= */
 footer {
   text-align: center;
-  padding: 30px;
+  padding: 24px;
   color: #94a3b8;
   font-size: 14px;
 }
 
-/* ================= RESPONSIVE ================= */
-@media (max-width: 768px) {
-  nav { padding: 14px 16px; }
-  nav a { margin-left: 16px; }
-
-  .hero h1 { font-size: 30px; }
-  .hero p { font-size: 16px; }
-
-  #map { height: 300px; }
-
-  .controls input,
-  .controls button {
-    width: 100%;
-  }
-
-  #status {
-    position: sticky;
-    top: 10px;
-    z-index: 10;
-  }
-
-  table.dataTable { display: none; }
-  .mobile-cards { display: block; }
+/* ================= MOBILE TWEAKS ================= */
+@media (max-width: 600px) {
+  nav .links a { margin-left: 12px; }
+  .controls button { grid-column: span 1; }
 }
 </style>
 </head>
 
 <body>
 
+<!-- NAV -->
 <nav>
   <div class="logo">🌍 Climate Risk</div>
-  <div>
+  <div class="links">
     <a href="#">Home</a>
     <a href="#">Product</a>
     <a href="#faq">FAQ</a>
   </div>
 </nav>
 
+<!-- HERO -->
 <div class="hero">
   <h1>Free Climate Risk Scan</h1>
   <p>Instant climate hazard profile for any location on Earth</p>
 </div>
 
+<!-- MAIN -->
 <div class="card">
   <h3>① Select Location</h3>
   <div id="map"></div>
@@ -221,7 +199,9 @@ footer {
     <input id="lat" placeholder="Latitude" readonly>
     <input id="lon" placeholder="Longitude" readonly>
     <input id="city" placeholder="City (optional)">
-    <button id="runBtn" onclick="compute()">🚀 Run Climate Model</button>
+    <button id="computeBtn" onclick="compute()" disabled>
+      🚀 Compute Climate Risk
+    </button>
   </div>
 
   <div id="status"></div>
@@ -230,23 +210,22 @@ footer {
 <!-- MODAL -->
 <div class="modal" id="modal">
   <div class="modal-content">
-    <button class="modal-close" onclick="closeModal()">✕</button>
     <h3 id="resultTitle"></h3>
-
     <table id="hazardTable" class="display" style="width:100%">
       <thead><tr><th>Hazard</th></tr></thead>
       <tbody></tbody>
     </table>
-
-    <div class="mobile-cards" id="mobileCards"></div>
+    <br>
+    <button onclick="closeModal()">Close</button>
   </div>
 </div>
 
+<!-- FAQ -->
 <div class="card" id="faq">
   <h2>FAQ</h2>
-  <p><b>How long does one scan take?</b><br>3–10 minutes depending on location.</p>
-  <p><b>What models are used?</b><br>ERA5 observations + CMIP6 SSP scenarios.</p>
-  <p><b>Is this free?</b><br>Yes — limited single-location scans.</p>
+  <p><b>How long does one scan take?</b><br>3–10 minutes depending on location and model complexity.</p>
+  <p><b>What data is used?</b><br>ERA5 observations and CMIP6 SSP scenarios with bias correction.</p>
+  <p><b>Is this free?</b><br>Yes — single-location scans are free.</p>
 </div>
 
 <footer>
@@ -254,77 +233,127 @@ footer {
 </footer>
 
 <script>
-let map, marker;
+let map, marker = null;
+let isComputing = false;
 
+/* ================= MAP ================= */
 function initMap() {
-  map = L.map('map').setView([20,0], 2);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  map = L.map('map', { center:[20,0], zoom:2 });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© OpenStreetMap'
+  }).addTo(map);
+
   map.on('click', e => {
-    lat.value = e.latlng.lat.toFixed(5);
-    lon.value = e.latlng.lng.toFixed(5);
+    const lat = e.latlng.lat.toFixed(5);
+    const lon = e.latlng.lng.toFixed(5);
+
+    document.getElementById('lat').value = lat;
+    document.getElementById('lon').value = lon;
+
     marker ? marker.setLatLng(e.latlng) : marker = L.marker(e.latlng).addTo(map);
+
+    document.getElementById('computeBtn').disabled = false;
+    showStatus(`📍 Location selected: ${lat}, ${lon}`, 'success');
   });
 }
 
-function showStatus(msg, cls){
+/* ================= STATUS ================= */
+function showStatus(msg, type){
   const s = document.getElementById('status');
   s.textContent = msg;
-  s.className = cls;
+  s.className = type;
   s.style.display = 'block';
 }
 
-async function compute(){
-  if (!lat.value || !lon.value) {
-    showStatus("❗ Select a location first", "error"); return;
+/* ================= COMPUTE ================= */
+async function compute() {
+  if (isComputing) return;
+
+  const lat = document.getElementById('lat').value;
+  const lon = document.getElementById('lon').value;
+  const city = document.getElementById('city').value.trim();
+  const btn = document.getElementById('computeBtn');
+
+  if (!lat || !lon) {
+    showStatus('❗ Please select a location on the map first', 'error');
+    return;
   }
 
-  runBtn.disabled = true;
-  runBtn.textContent = "⏳ Computing…";
-  showStatus("🔄 Running climate models (3–10 min)…", "loading");
+  isComputing = true;
+  btn.disabled = true;
+  btn.textContent = '⏳ Computing...';
+  showStatus('🔄 Running climate models (3–10 minutes)...', 'loading');
 
-  const res = await fetch(`/run?lat=${lat.value}&lon=${lon.value}`);
-  const json = await res.json();
+  try {
+    const cityParam = city ? `&city=${encodeURIComponent(city)}` : '';
+    const apiUrl = `${window.location.origin}/run?lat=${lat}&lon=${lon}${cityParam}`;
 
-  renderResults(json.data, json.columns);
-  showStatus("✅ Scan complete", "success");
-  modal.style.display = 'block';
+    const res = await fetch(apiUrl);
+    if (!res.ok) throw new Error(`Backend error (${res.status})`);
 
-  runBtn.disabled = false;
-  runBtn.textContent = "🚀 Run Climate Model";
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Backend failed');
+
+    renderTable(json.data, json.columns, city, lat, lon);
+    showStatus('✅ Scan complete', 'success');
+    document.getElementById('modal').style.display = 'block';
+
+  } catch (e) {
+    showStatus(`❌ ${e.message}`, 'error');
+  } finally {
+    isComputing = false;
+    btn.disabled = false;
+    btn.textContent = '🚀 Compute Climate Risk';
+  }
 }
 
-function renderResults(data, columns){
-  // Desktop table
+/* ================= TABLE ================= */
+function scoreClass(v){
+  if(v==null) return 'color-0';
+  if(v>=4) return 'color-5';
+  if(v>=3) return 'color-4';
+  if(v>=2) return 'color-3';
+  if(v>=1) return 'color-2';
+  return 'color-1';
+}
+
+function renderTable(data, columns, city, lat, lon){
   if ($.fn.DataTable.isDataTable('#hazardTable')) {
     $('#hazardTable').DataTable().destroy();
   }
+
   $('#hazardTable thead tr').html(
     '<th>Hazard</th>' + columns.slice(1).map(c=>`<th>${c}</th>`).join('')
   );
+
   $('#hazardTable tbody').html(
     data.map(r=>`
       <tr>
-        <td>${r.Hazard}</td>
+        <td><b>${r.Hazard}</b></td>
         ${columns.slice(1).map(c=>{
-          const v=r[c];
-          return `<td class="color-${Math.floor(v??0)}">${v==null?'—':v.toFixed(2)}</td>`;
+          const v = r[c];
+          return `<td class="${scoreClass(v)}" style="text-align:center">
+            ${v==null?'—':v.toFixed(2)}
+          </td>`;
         }).join('')}
-      </tr>`).join('')
+      </tr>
+    `).join('')
   );
-  $('#hazardTable').DataTable({ paging:false, scrollX:true });
 
-  // Mobile cards
-  mobileCards.innerHTML = data.map(r=>`
-    <div class="card-row">
-      <h4>${r.Hazard}</h4>
-      ${columns.slice(1).map(c=>{
-        const v=r[c];
-        return `<div><b>${c}:</b> ${v==null?'—':v.toFixed(2)}</div>`;
-      }).join('')}
-    </div>`).join('');
+  $('#hazardTable').DataTable({
+    paging:false,
+    scrollX:true,
+    order:[[0,'asc']]
+  });
+
+  document.getElementById('resultTitle').textContent =
+    `${city || 'Selected Location'} (${lat}, ${lon})`;
 }
 
-function closeModal(){ modal.style.display = 'none'; }
+/* ================= MODAL ================= */
+function closeModal(){
+  document.getElementById('modal').style.display = 'none';
+}
 
 document.addEventListener('DOMContentLoaded', initMap);
 </script>
