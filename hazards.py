@@ -6,14 +6,12 @@ import concurrent.futures
 import logging
 from scipy import stats
 from pandas.tseries.offsets import DateOffset
-import threading   # <-- ADD (for Render-safe EE calls)
-
-# Render-safe: Earth Engine is NOT thread-safe
-_EE_LOCK = threading.Lock()
 
 # --- 0. SETUP ---
 logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
+
+EE_INITIALIZED = False
 
 def safe_to_float(val, default=0.3):
     """Convert EE results safely (handles None)"""
@@ -23,6 +21,20 @@ def safe_to_float(val, default=0.3):
         return float(val)
     except:
         return default
+
+def ensure_ee_initialized():
+    global EE_INITIALIZED
+    if not EE_INITIALIZED:
+        try:
+            ee.Initialize(project='citric-snow-424111-q0')
+        except:
+            try:
+                ee.Authenticate()
+                ee.Initialize(project='citric-snow-424111-q0')
+            except Exception as e:
+                logging.error(f"EE init failed: {e}")
+                raise
+        EE_INITIALIZED = True
 
 # --- CONFIGURATION ---
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
@@ -54,10 +66,7 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
             )
             return ee.Feature(None, stats).set('system:time_start', img.get('system:time_start'))
 
-        # Render-safe: serialize EE getInfo()
-        with _EE_LOCK:
-            data_list = coll.map(reduce_to_point).getInfo()['features']
-
+        data_list = coll.map(reduce_to_point).getInfo()['features']
         if not data_list: return pd.DataFrame()
 
         rows = []
@@ -78,8 +87,7 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
         elif 'pr' in df.columns:
             df['pr'] = pd.to_numeric(df['pr'], errors='coerce') * 86400
         return df
-    except Exception as e:
-        logging.exception("EE fetch_chunk failed")
+    except: 
         return pd.DataFrame()
 
 def get_full_series(collection_id, geom, start_date, end_date, bands, model=None, scenario=None):
@@ -124,13 +132,12 @@ def perform_qm(train_df, hist_df, fut_df, t_col, h_col, f_col):
 def get_ipcc_slr_multiplier(year, scenario, geom):
     try:
         elevation_img = ee.Image("NASA/NASADEM_HGT/001").select('elevation')
-        with _EE_LOCK:  # Render-safe EE call
-            local_elev = elevation_img.reduceRegion(
-                reducer=ee.Reducer.mean(),
-                geometry=geom,
-                scale=30,
-                bestEffort=True
-            ).get('elevation').getInfo()
+        local_elev = elevation_img.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=geom,
+            scale=30,
+            bestEffort=True
+        ).get('elevation').getInfo()
     except Exception:
         local_elev = None
 
@@ -144,8 +151,7 @@ def get_ipcc_slr_multiplier(year, scenario, geom):
     epoch = min(slr_factors[scenario].keys(), key=lambda x: abs(x - year))
     factor = slr_factors[scenario][epoch]
 
-    with _EE_LOCK:
-        lon, lat = geom.coordinates().getInfo()
+    lon, lat = geom.coordinates().getInfo()
     coastal_mult = 1.2 if abs(lat - 42.35) < 0.5 and abs(lon + 71.0) < 0.5 else 1.0
 
     return factor * coastal_mult
@@ -174,9 +180,7 @@ def system_metrics_invalid(result):
 def sample_nearest_wri(coll, point, use_baseline_bau30, year=None, scenario_name=None):
     try:
         knn = coll.map(lambda f: f.set('distance', ee.Feature(point).distance(f.geometry())))
-        with _EE_LOCK:  # Render-safe EE call
-            nearest = knn.sort('distance').limit(1).getInfo()['features']
-
+        nearest = knn.sort('distance').limit(1).getInfo()['features']
 
         if not nearest:
             return None
@@ -206,8 +210,7 @@ def sample_nearest_wri(coll, point, use_baseline_bau30, year=None, scenario_name
 
 def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_baseline_bau30=False):
     start_time = time.time()
-    with _EE_LOCK:  # Render-safe EE call
-        lon, lat = geom.coordinates().getInfo()
+    lon, lat = geom.coordinates().getInfo()
 
     if use_baseline_bau30:
         coll = ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/baseline_annual")
@@ -349,10 +352,9 @@ def get_fire_cyclone_baselines(geom):
         .median()
 
     ndvi = landsat.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
-    with _EE_LOCK:  # Render-safe EE call
-        ndvi_val = ndvi.reduceRegion(
-            ee.Reducer.mean(), geom, 1000, bestEffort=True
-        ).get('NDVI')
+    ndvi_val = ndvi.reduceRegion(
+        ee.Reducer.mean(), geom, 1000, bestEffort=True
+    ).get('NDVI')
 
     firms = ee.ImageCollection("FIRMS") \
         .filterBounds(geom) \
@@ -383,26 +385,24 @@ def get_fire_cyclone_baselines(geom):
     
     max_wind = tracks.map(clean_wind).aggregate_max('peak_wind')
 
-    with _EE_LOCK:  # Render-safe EE call
-        return ee.Dictionary({
-            'NDVI': ndvi_val,
-            'wf_count': wf_count,
-            'storm_count': storm_count,
-            'max_wind_knots': max_wind
-        }).getInfo()
-
+    return ee.Dictionary({
+        'NDVI': ndvi_val,
+        'wf_count': wf_count,
+        'storm_count': storm_count,
+        'max_wind_knots': max_wind
+    }).getInfo()
 
 # -------------------------------------------------------------------------
 # 4. MAIN API FUNCTION
 # -------------------------------------------------------------------------
 def run_for_point(lat: float, lon: float):
+    ensure_ee_initialized()
     
     total_start = time.time()
     final_rows = []
     WRI_WATER_HAZARDS = ['Water Stress', 'Drought Risk', 'Seasonal Variability', 'Interannual Variability']
 
-    logging.info(f"🌍 Processing ({lat:.4f}, {lon:.4f})...")
-
+    print(f"🌍 Processing ({lat:.4f}, {lon:.4f})...")
     geom = ee.Geometry.Point([lon, lat])
     
     # Climate data fetching (parallel)
@@ -632,10 +632,6 @@ def run_for_point(lat: float, lon: float):
 
     # Final matrix
     matrix_start = time.time()
-    # Safety guard: avoid empty hazard matrix
-    if not final_rows:
-        raise RuntimeError("No hazard scores generated for this location")
-
     df_final = pd.DataFrame(final_rows).pivot(index='Hazard', columns='Column', values='Score')
     cols = ['Observed_2024'] + [f'{s}_{e}' for s in ['Trend', 'ssp245', 'ssp585'] for e in EPOCHS]
     df_final = df_final[[c for c in cols if c in df_final.columns]].reset_index()
@@ -647,9 +643,4 @@ def run_for_point(lat: float, lon: float):
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
 
-
                                      
-
-
-
-
