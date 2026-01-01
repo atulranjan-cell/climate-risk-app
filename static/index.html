@@ -1,306 +1,214 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Climate Hazard Outlook</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8">
+  <title>Climate Hazard Matrix</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <!-- jQuery + DataTables -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
 
-<style>
-:root{
-  --low:#2c7bb6;
-  --lowmedium:#abd9e9;
-  --mediumhigh:#fdae61;
-  --high:#f46d43;
-  --extreme:#d73027;
-  --track:#e6e9ee;
-  --muted:#6b7280;
-}
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-*{box-sizing:border-box;font-family:Inter,sans-serif}
-body{margin:0}
-#map{height:100vh}
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+      max-width: 1400px; margin: 0 auto; padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #333;
+    }
+    .card {
+      background: white; border-radius: 12px; padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2); margin-bottom: 20px;
+    }
+    #map {
+      height: 420px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+    }
+    .controls {
+      display: flex; gap: 15px; align-items: end; flex-wrap: wrap;
+      margin: 20px 0;
+    }
+    input {
+      padding: 12px; border: 2px solid #e1e5e9; border-radius: 8px;
+      font-size: 16px; width: 160px;
+    }
+    input[readonly] { background: #f5f6f8; }
+    button {
+      padding: 12px 24px;
+      background: linear-gradient(135deg, #1e90ff, #0f6fd9);
+      color: white; border: none; border-radius: 8px;
+      font-size: 16px; font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #status {
+      margin: 15px 0; padding: 12px;
+      border-radius: 8px; font-weight: 600;
+    }
+    .loading { background: #fff3cd; color: #856404; }
+    .error { background: #f8d7da; color: #721c24; }
+    .success { background: #d4edda; color: #155724; }
 
-/* PANEL */
-.panel{
-  position:absolute;
-  top:20px;
-  left:20px;
-  width:260px;
-  background:#fff;
-  padding:14px;
-  border-radius:12px;
-  box-shadow:0 12px 28px rgba(0,0,0,.18);
-  z-index:1000;
-}
-.panel input{
-  width:100%;
-  padding:8px 10px;
-  margin-bottom:8px;
-  border-radius:6px;
-  border:1px solid #d1d5db;
-  font-size:14px;
-}
-.panel button{
-  width:100%;
-  padding:10px;
-  border-radius:6px;
-  border:none;
-  background:#2563eb;
-  color:#fff;
-  font-weight:600;
-  cursor:pointer;
-}
-.panel .hint{
-  margin-top:6px;
-  font-size:12px;
-  color:var(--muted);
-}
-
-/* POPUP */
-.popup{
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,.35);
-  display:none;
-  z-index:2000;
-}
-.popup.show{display:block}
-
-.popup-card{
-  background:#fff;
-  width:1100px;
-  max-width:95%;
-  margin:40px auto;
-  padding:32px;
-  border-radius:18px;
-  position:relative;
-}
-.close{
-  position:absolute;
-  right:18px;
-  top:14px;
-  font-size:26px;
-  cursor:pointer;
-}
-
-/* GAUGES */
-.gauges{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:32px;
-}
-.gauge{text-align:center}
-
-.title{
-  display:flex;
-  justify-content:center;
-  gap:6px;
-  font-weight:600;
-}
-.info{cursor:pointer;color:#64748b}
-
-/* TOOLTIP */
-.tooltip{
-  position:fixed;
-  background:#111827;
-  color:#fff;
-  padding:10px 12px;
-  border-radius:8px;
-  font-size:12px;
-  width:260px;
-  line-height:1.4;
-  z-index:9999;
-  display:none;
-}
-
-svg{width:200px}
-.arc{transition:.3s}
-.label{font-weight:700;font-size:18px}
-.sub{color:#6b7280;font-size:13px}
-
-@media(max-width:900px){
-  .gauges{grid-template-columns:repeat(2,1fr)}
-}
-</style>
+    table.dataTable { font-size: 13px; }
+    .color-5 { background:#d73027;color:#fff }
+    .color-4 { background:#f46d43;color:#fff }
+    .color-3 { background:#fdae61 }
+    .color-2 { background:#abd9e9 }
+    .color-1 { background:#d1f2eb }
+    .color-0 { background:#f8f9fa }
+  </style>
 </head>
 
 <body>
+<div class="card">
+  <h1>Climate Hazard Matrix</h1>
+  <p style="color:#666">Click on the map to select a location</p>
 
-<div id="map"></div>
+  <!-- MAP -->
+  <div id="map"></div>
 
-<!-- PANEL -->
-<div class="panel">
-  <input id="lat" value="25.663651">
-  <input id="lon" value="85.139280">
-  <button onclick="getRisk()">Calculate Climate Risk</button>
-  <div class="hint">🖱 Click anywhere on the map to assess risk</div>
-</div>
+  <!-- CONTROLS -->
+  <div class="controls">
+    <input id="lat" placeholder="Latitude" readonly>
+    <input id="lon" placeholder="Longitude" readonly>
+    <input id="city" placeholder="City (optional)">
+    <button id="computeBtn" onclick="compute()" disabled>🚀 Compute Hazards</button>
+  </div>
 
-<!-- POPUP -->
-<div class="popup" id="popup">
-  <div class="popup-card">
-    <span class="close" onclick="closePopup()">×</span>
+  <div id="status"></div>
 
-    <div class="gauges">
-
-      <!-- WATER STRESS -->
-      <div class="gauge">
-        <div class="title">Water Stress
-          <span class="info" data-tip="Ratio of total annual water withdrawals to available renewable water supply. Arid & low-use basins are shown separately. Source: WRI Aqueduct v4">ⓘ</span>
-        </div>
-        <svg viewBox="0 0 200 120">
-          <path d="M20 100 A80 80 0 0 1 180 100" stroke="var(--track)" stroke-width="14" fill="none"/>
-          <path id="arc-water" class="arc" d="M20 100 A80 80 0 0 1 180 100" stroke-width="14" fill="none"/>
-        </svg>
-        <div id="label-water" class="label">–</div>
-        <div id="value-water" class="sub"></div>
-      </div>
-
-      <!-- DROUGHT -->
-      <div class="gauge">
-        <div class="title">Drought
-          <span class="info" data-tip="Frequency, duration, and severity of drought events. Source: WRI Aqueduct v4">ⓘ</span>
-        </div>
-        <svg viewBox="0 0 200 120">
-          <path d="M20 100 A80 80 0 0 1 180 100" stroke="var(--track)" stroke-width="14" fill="none"/>
-          <path id="arc-drought" class="arc" d="M20 100 A80 80 0 0 1 180 100" stroke-width="14" fill="none"/>
-        </svg>
-        <div id="label-drought" class="label">–</div>
-        <div id="value-drought" class="sub"></div>
-      </div>
-
-      <!-- RIVER FLOOD -->
-      <div class="gauge">
-        <div class="title">River Flood
-          <span class="info" data-tip="Modeled flood depth, frequency, and exposure. Source: WRI Aqueduct v4">ⓘ</span>
-        </div>
-        <svg viewBox="0 0 200 120">
-          <path d="M20 100 A80 80 0 0 1 180 100" stroke="var(--track)" stroke-width="14" fill="none"/>
-          <path id="arc-river" class="arc" d="M20 100 A80 80 0 0 1 180 100" stroke-width="14" fill="none"/>
-        </svg>
-        <div id="label-river" class="label">–</div>
-        <div id="value-river" class="sub"></div>
-      </div>
-
-      <!-- COASTAL FLOOD -->
-      <div class="gauge">
-        <div class="title">Coastal Flood
-          <span class="info" data-tip="Exposure to sea-level rise and storm surge. Coastal only. Source: WRI Aqueduct v4">ⓘ</span>
-        </div>
-        <svg viewBox="0 0 200 120">
-          <path d="M20 100 A80 80 0 0 1 180 100" stroke="var(--track)" stroke-width="14" fill="none"/>
-          <path id="arc-coastal" class="arc" d="M20 100 A80 80 0 0 1 180 100" stroke-width="14" fill="none"/>
-        </svg>
-        <div id="label-coastal" class="label">–</div>
-        <div id="value-coastal" class="sub"></div>
-      </div>
-
-    </div>
+  <!-- RESULTS -->
+  <div class="card" id="results" style="display:none">
+    <h3 id="resultsTitle"></h3>
+    <table id="hazardTable" class="display" style="width:100%">
+      <thead><tr><th>Hazard</th></tr></thead>
+      <tbody></tbody>
+    </table>
   </div>
 </div>
 
-<div id="tooltip" class="tooltip"></div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
 <script>
-const map = L.map('map').setView([20,0],2);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+let map, marker = null;
+let isComputing = false;
 
-let marker;
-const tooltip = document.getElementById("tooltip");
+/* ---------------- MAP ---------------- */
+function initMap() {
+  map = L.map('map', { center:[20,0], zoom:2 });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© OpenStreetMap'
+  }).addTo(map);
 
-/* TOOLTIP */
-document.querySelectorAll(".info").forEach(el=>{
-  el.addEventListener("mouseenter",e=>{
-    tooltip.innerText = e.target.dataset.tip;
-    tooltip.style.display = "block";
-    const r = e.target.getBoundingClientRect();
-    tooltip.style.top = (r.top - tooltip.offsetHeight - 10) + "px";
-    tooltip.style.left = (r.left + r.width/2 - tooltip.offsetWidth/2) + "px";
+  map.on('click', e => {
+    const lat = e.latlng.lat.toFixed(5);
+    const lon = e.latlng.lng.toFixed(5);
+
+    document.getElementById('lat').value = lat;
+    document.getElementById('lon').value = lon;
+
+    if (marker) marker.setLatLng(e.latlng);
+    else marker = L.marker(e.latlng).addTo(map);
+
+    document.getElementById('computeBtn').disabled = false;
+    showStatus(`📍 Location selected: ${lat}, ${lon}`, 'success');
   });
-  el.addEventListener("mouseleave",()=>tooltip.style.display="none");
-});
+}
 
-/* GAUGE RENDER (UPDATED) */
-function renderGauge(score, arcId, labelId, valueId, isWaterStress=false){
-  const arc=document.getElementById(arcId);
-  const label=document.getElementById(labelId);
-  const value=document.getElementById(valueId);
+/* ---------------- COMPUTE ---------------- */
+async function compute() {
+  if (isComputing) return;
 
-  // ✅ WRI special category
-  if(isWaterStress && Number(score) === -1){
-    arc.style.stroke="var(--track)";
-    arc.style.strokeDasharray="0 251";
-    label.innerText="Arid & Low Water Use";
-    value.innerText="WRI-defined category";
+  const lat = document.getElementById('lat').value;
+  const lon = document.getElementById('lon').value;
+  const city = document.getElementById('city').value.trim();
+
+  if (!lat || !lon) {
+    showStatus('❗ Click on the map first', 'error');
     return;
   }
 
-  // Missing data
-  if(score==null){
-    arc.style.stroke="var(--track)";
-    arc.style.strokeDasharray="0 251";
-    label.innerText="Not Available";
-    value.innerText="";
-    return;
+  isComputing = true;
+  const btn = document.getElementById('computeBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Computing...';
+  showStatus('🔄 Fetching climate data...', 'loading');
+
+  try {
+    const cityParam = city ? `&city=${encodeURIComponent(city)}` : '';
+    const res = await fetch(`/run?lat=${lat}&lon=${lon}${cityParam}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+
+    renderTable(json.data, json.columns, city, lat, lon);
+    showStatus('✅ Computation complete', 'success');
+    document.getElementById('results').style.display = 'block';
+  } catch (e) {
+    showStatus(`❌ ${e.message}`, 'error');
+  } finally {
+    isComputing = false;
+    btn.disabled = false;
+    btn.textContent = '🚀 Compute Hazards';
+  }
+}
+
+/* ---------------- TABLE ---------------- */
+function scoreClass(v){
+  if(v==null) return 'color-0';
+  if(v>=4) return 'color-5';
+  if(v>=3) return 'color-4';
+  if(v>=2) return 'color-3';
+  if(v>=1) return 'color-2';
+  return 'color-1';
+}
+
+function renderTable(data, columns, city, lat, lon){
+  if ($.fn.DataTable.isDataTable('#hazardTable')) {
+    $('#hazardTable').DataTable().destroy();
   }
 
-  const s=Number(score);
-  const dash=251*Math.min(s/5,1);
+  $('#hazardTable thead tr').html(
+    '<th>Hazard</th>' + columns.slice(1).map(c=>`<th>${c}</th>`).join('')
+  );
 
-  let txt,color;
-  if(s<=1){txt="Low";color="var(--low)";}
-  else if(s<=2){txt="Low–Medium";color="var(--lowmedium)";}
-  else if(s<=3){txt="Medium–High";color="var(--mediumhigh)";}
-  else if(s<=4){txt="High";color="var(--high)";}
-  else{txt="Extremely High";color="var(--extreme)";}
+  const rows = data.map(r=>{
+    let t = `<tr><td><b>${r.Hazard}</b></td>`;
+    for(let i=1;i<columns.length;i++){
+      const v = r[columns[i]];
+      t += `<td class="${scoreClass(v)}" style="text-align:center">
+        ${v==null?'—':v.toFixed(2)}
+      </td>`;
+    }
+    return t+'</tr>';
+  }).join('');
 
-  arc.style.stroke=color;
-  arc.style.strokeDasharray=`${dash} 251`;
-  label.innerText=txt;
-  value.innerText=`Score: ${s.toFixed(2)} / 5`;
+  $('#hazardTable tbody').html(rows);
+
+  $('#hazardTable').DataTable({
+    paging:false,
+    scrollX:true,
+    order:[[0,'asc']]
+  });
+
+  document.getElementById('resultsTitle').textContent =
+    `${city || 'Selected Location'} (${lat}, ${lon})`;
 }
 
-function closePopup(){
-  document.getElementById("popup").classList.remove("show");
+/* ---------------- STATUS ---------------- */
+function showStatus(msg,type){
+  const s=document.getElementById('status');
+  s.textContent=msg;
+  s.className=type;
 }
 
-/* BUTTON */
-async function getRisk(){
-  const lat=Number(document.getElementById("lat").value);
-  const lon=Number(document.getElementById("lon").value);
-
-  const res=await fetch(`/risk?lat=${lat}&lon=${lon}`);
-  const d=await res.json();
-  const s=d.scores;
-
-  renderGauge(s.water_stress_category,"arc-water","label-water","value-water",true);
-  renderGauge(s.drought_risk_score,"arc-drought","label-drought","value-drought");
-  renderGauge(s.river_flood_risk_score,"arc-river","label-river","value-river");
-  renderGauge(s.coastal_flood_risk_score,"arc-coastal","label-coastal","value-coastal");
-
-  document.getElementById("popup").classList.add("show");
-}
-
-/* MAP CLICK */
-map.on("click", async e=>{
-  const lat=e.latlng.lat.toFixed(6);
-  const lon=((((e.latlng.lng+180)%360+360)%360)-180).toFixed(6);
-
-  document.getElementById("lat").value=lat;
-  document.getElementById("lon").value=lon;
-
-  if(marker) map.removeLayer(marker);
-  marker=L.marker([lat,lon]).addTo(map);
-  map.setView([lat,lon],7);
-
-  await getRisk();
-});
+/* INIT */
+document.addEventListener('DOMContentLoaded', initMap);
 </script>
-
 </body>
 </html>
