@@ -109,8 +109,7 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
             rows.append(row)
 
         df = pd.DataFrame(rows)
-        if 'time' not in df.columns:
-            return pd.DataFrame()
+
         df['date'] = pd.to_datetime(df['time'], unit='ms', errors='coerce')
         df = df.dropna(
             subset=['date'],
@@ -684,4 +683,5 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                     
+
 
