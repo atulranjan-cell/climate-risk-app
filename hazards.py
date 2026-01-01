@@ -6,35 +6,51 @@ import concurrent.futures
 import logging
 from scipy import stats
 from pandas.tseries.offsets import DateOffset
+import os
+import json
+import tempfile
 
 # --- 0. SETUP ---
 logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 
-EE_INITIALIZED = False
+# =================================================
+# EARTH ENGINE INITIALIZATION (SERVICE ACCOUNT)
+# =================================================
 
-def safe_to_float(val, default=0.3):
-    """Convert EE results safely (handles None)"""
-    if val is None:
-        return default
-    try:
-        return float(val)
-    except:
-        return default
+EE_INITIALIZED = False
 
 def ensure_ee_initialized():
     global EE_INITIALIZED
-    if not EE_INITIALIZED:
-        try:
-            ee.Initialize(project='citric-snow-424111-q0')
-        except:
-            try:
-                ee.Authenticate()
-                ee.Initialize(project='citric-snow-424111-q0')
-            except Exception as e:
-                logging.error(f"EE init failed: {e}")
-                raise
-        EE_INITIALIZED = True
+    if EE_INITIALIZED:
+        return
+
+    if "GCP_SERVICE_ACCOUNT" not in os.environ:
+        raise RuntimeError("Missing GCP_SERVICE_ACCOUNT environment variable")
+
+    service_account_info = json.loads(
+        os.environ["GCP_SERVICE_ACCOUNT"]
+    )
+
+    # Write service account JSON to temp file
+    with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
+        json.dump(service_account_info, f)
+        key_path = f.name
+
+    credentials = ee.ServiceAccountCredentials(
+        service_account_info["client_email"],
+        key_path
+    )
+
+    ee.Initialize(
+        credentials,
+        project=service_account_info["project_id"],
+        url="https://earthengine-highvolume.googleapis.com"
+    )
+
+    logging.info("🌍 Earth Engine initialized (service account)")
+    EE_INITIALIZED = True
+
 
 # --- CONFIGURATION ---
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
@@ -644,3 +660,4 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
