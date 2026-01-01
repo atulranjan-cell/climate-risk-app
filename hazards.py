@@ -1,4 +1,3 @@
-what to change in code to completely correct this issue
 import ee
 import pandas as pd
 import numpy as np
@@ -673,6 +672,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
