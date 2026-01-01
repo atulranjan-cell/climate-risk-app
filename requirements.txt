@@ -1,3 +1,23 @@
+# Core
+numpy
+pandas
+scipy
+
+# FastAPI backend
 fastapi
 uvicorn
+pydantic
+
+# Google Earth Engine
 earthengine-api
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+
+# Networking / SSL
+urllib3
+requests
+
+# Utilities
+python-dateutil
