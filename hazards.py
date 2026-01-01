@@ -63,7 +63,26 @@ def safe_to_float(val, default=0.3):
     except Exception:
         return default
 
-
+def robust_datetime(df):
+            """Convert 'time' column to 'date' robustly across formats."""
+            time_col = df['time'].dropna()
+            
+            # Try common numeric units (ms most common for EE)
+            for unit in ['ms', 's', 'ns', 'us']:
+                try:
+                    test_dates = pd.to_datetime(time_col.head(5), unit=unit, errors='raise')
+                    if test_dates.min() > pd.Timestamp('1900-01-01') and test_dates.max() < pd.Timestamp('2100-01-01'):
+                        df['date'] = pd.to_datetime(df['time'], unit=unit, errors='coerce')
+                        valid_pct = df['date'].notna().mean()
+                        if valid_pct > 0.9:  # 90% success threshold
+                            return df.dropna(subset=['date'])
+                except:
+                    continue
+            
+            # Fallback: infer format (strings/ISO/mixed)
+            df['date'] = pd.to_datetime(df['time'], errors='coerce', infer_datetime_format=True)
+            return df.dropna(subset=['date'])
+    
 # --- CONFIGURATION ---
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
 EPOCH_MIDPOINTS = {'2030s': 2030, '2050s': 2050, '2080s': 2080}
@@ -83,7 +102,6 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
         coll = (
             ee.ImageCollection(collection_id)
             .filterDate(start, end)
-            .filter(ee.Filter.notNull(['system:time_start']))
         )
 
         if model: coll = coll.filterMetadata('model', 'equals', model)
@@ -109,14 +127,10 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
             rows.append(row)
 
         df = pd.DataFrame(rows)
-
-        df['date'] = pd.to_datetime(df['time'], unit='ms', errors='coerce')
-        df = df.dropna(
-            subset=['date'],
-            how='any'
-        )
-
-
+        
+        # Usage
+        df = robust_datetime(df)
+        
         for b in ['temperature_2m', 'temperature_2m_max', 'temperature_2m_min', 'tas', 'tasmax', 'tasmin']:
             if b in df.columns:
                 df[b] = pd.to_numeric(df[b], errors='coerce')
@@ -683,5 +697,6 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                     
+
 
 
