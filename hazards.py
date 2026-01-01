@@ -6,6 +6,10 @@ import concurrent.futures
 import logging
 from scipy import stats
 from pandas.tseries.offsets import DateOffset
+import threading   # <-- ADD (for Render-safe EE calls)
+
+# Render-safe: Earth Engine is NOT thread-safe
+_EE_LOCK = threading.Lock()
 
 # --- 0. SETUP ---
 logging.getLogger('urllib3').setLevel(logging.ERROR)
@@ -29,7 +33,7 @@ CMIP6_HIST_RANGE = ('1960-01-01', '2014-12-31')
 CMIP6_FUT_RANGE = ('2025-01-01', '2085-12-31')
 MODEL = 'MPI-ESM1-2-HR'
 CHUNK_SIZE_YEARS = 12
-MAX_WORKERS = 4
+MAX_WORKERS = 1
 
 # -------------------------------------------------------------------------
 # 1. SPATIAL CLIMATE ENGINE
@@ -50,7 +54,10 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
             )
             return ee.Feature(None, stats).set('system:time_start', img.get('system:time_start'))
 
-        data_list = coll.map(reduce_to_point).getInfo()['features']
+        # Render-safe: serialize EE getInfo()
+        with _EE_LOCK:
+            data_list = coll.map(reduce_to_point).getInfo()['features']
+
         if not data_list: return pd.DataFrame()
 
         rows = []
@@ -71,7 +78,8 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
         elif 'pr' in df.columns:
             df['pr'] = pd.to_numeric(df['pr'], errors='coerce') * 86400
         return df
-    except: 
+    except Exception as e:
+        logging.exception("EE fetch_chunk failed")
         return pd.DataFrame()
 
 def get_full_series(collection_id, geom, start_date, end_date, bands, model=None, scenario=None):
@@ -116,12 +124,13 @@ def perform_qm(train_df, hist_df, fut_df, t_col, h_col, f_col):
 def get_ipcc_slr_multiplier(year, scenario, geom):
     try:
         elevation_img = ee.Image("NASA/NASADEM_HGT/001").select('elevation')
-        local_elev = elevation_img.reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=geom,
-            scale=30,
-            bestEffort=True
-        ).get('elevation').getInfo()
+        with _EE_LOCK:  # Render-safe EE call
+            local_elev = elevation_img.reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=geom,
+                scale=30,
+                bestEffort=True
+            ).get('elevation').getInfo()
     except Exception:
         local_elev = None
 
@@ -135,7 +144,8 @@ def get_ipcc_slr_multiplier(year, scenario, geom):
     epoch = min(slr_factors[scenario].keys(), key=lambda x: abs(x - year))
     factor = slr_factors[scenario][epoch]
 
-    lon, lat = geom.coordinates().getInfo()
+    with _EE_LOCK:
+        lon, lat = geom.coordinates().getInfo()
     coastal_mult = 1.2 if abs(lat - 42.35) < 0.5 and abs(lon + 71.0) < 0.5 else 1.0
 
     return factor * coastal_mult
@@ -164,7 +174,9 @@ def system_metrics_invalid(result):
 def sample_nearest_wri(coll, point, use_baseline_bau30, year=None, scenario_name=None):
     try:
         knn = coll.map(lambda f: f.set('distance', ee.Feature(point).distance(f.geometry())))
-        nearest = knn.sort('distance').limit(1).getInfo()['features']
+        with _EE_LOCK:  # Render-safe EE call
+            nearest = knn.sort('distance').limit(1).getInfo()['features']
+
 
         if not nearest:
             return None
@@ -251,7 +263,7 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
         all_points[f'{radius//1000}km_S'] = ee.Geometry.Point([lon, lat - delta_lat])
         all_points[f'{radius//1000}km_W'] = ee.Geometry.Point([lon - delta_lon, lat])
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         futures = {executor.submit(sample_nearest_wri, coll, pt, use_baseline_bau30, year, scenario_name):
                    name for name, pt in all_points.items()}
 
@@ -312,7 +324,7 @@ def get_all_wri_parallel(geom):
     all_wri_results = {}
     timings = {}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         futures = {}
         for config_idx, config in enumerate(wri_configs):
             scenario_name, year, scen_name, is_base = config
@@ -369,12 +381,14 @@ def get_fire_cyclone_baselines(geom):
     
     max_wind = tracks.map(clean_wind).aggregate_max('peak_wind')
 
-    return ee.Dictionary({
-        'NDVI': ndvi_val,
-        'wf_count': wf_count,
-        'storm_count': storm_count,
-        'max_wind_knots': max_wind
-    }).getInfo()
+     with _EE_LOCK:  # Render-safe EE call
+        return ee.Dictionary({
+            'NDVI': ndvi_val,
+            'wf_count': wf_count,
+            'storm_count': storm_count,
+            'max_wind_knots': max_wind
+        }).getInfo()
+
 
 # -------------------------------------------------------------------------
 # 4. MAIN API FUNCTION
@@ -385,7 +399,8 @@ def run_for_point(lat: float, lon: float):
     final_rows = []
     WRI_WATER_HAZARDS = ['Water Stress', 'Drought Risk', 'Seasonal Variability', 'Interannual Variability']
 
-    print(f"🌍 Processing ({lat:.4f}, {lon:.4f})...")
+    logging.info(f"🌍 Processing ({lat:.4f}, {lon:.4f})...")
+
     geom = ee.Geometry.Point([lon, lat])
     
     # Climate data fetching (parallel)
@@ -615,6 +630,10 @@ def run_for_point(lat: float, lon: float):
 
     # Final matrix
     matrix_start = time.time()
+    # Safety guard: avoid empty hazard matrix
+    if not final_rows:
+        raise RuntimeError("No hazard scores generated for this location")
+
     df_final = pd.DataFrame(final_rows).pivot(index='Hazard', columns='Column', values='Score')
     cols = ['Observed_2024'] + [f'{s}_{e}' for s in ['Trend', 'ssp245', 'ssp585'] for e in EPOCHS]
     df_final = df_final[[c for c in cols if c in df_final.columns]].reset_index()
@@ -628,3 +647,4 @@ def run_for_point(lat: float, lon: float):
 
 
                                      
+
