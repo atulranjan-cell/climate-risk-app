@@ -1,321 +1,319 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
+<meta charset="UTF-8">
 <title>Climate Risk Scan</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- Libraries -->
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+<!-- jQuery + DataTables -->
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
 <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
 
+<!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
-/* ================= GLOBAL ================= */
+/* =====================================================
+   1. GLOBAL BASE
+===================================================== */
 * { box-sizing: border-box; }
+
 body {
   margin: 0;
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-  background: linear-gradient(135deg,#667eea,#764ba2);
-  color: #111;
+  font-family: "Inter", sans-serif;
+  background: radial-gradient(circle at top, #2b2f4b, #0f1220);
+  color: #e5e7eb;
 }
 
-/* ================= NAV ================= */
+/* =====================================================
+   2. NAVBAR
+===================================================== */
 nav {
-  background: rgba(255,255,255,0.95);
-  padding: 16px 40px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  position: sticky;
-  top: 0;
-  z-index: 1000;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  padding: 18px 40px;
 }
+
 nav .logo {
-  font-weight: 800;
+  font-weight: 700;
   font-size: 20px;
+  letter-spacing: 0.5px;
 }
+
 nav a {
-  margin-left: 24px;
+  color: #c7d2fe;
+  margin-left: 28px;
   text-decoration: none;
   font-weight: 600;
-  color: #333;
 }
-nav a:hover { color: #1e90ff; }
 
-/* ================= SECTIONS ================= */
-section {
-  max-width: 1400px;
-  margin: 40px auto;
-  padding: 0 20px;
+nav a:hover { color: #ffffff; }
+
+/* =====================================================
+   3. HERO
+===================================================== */
+.hero {
+  text-align: center;
+  padding: 70px 20px 40px;
 }
+
+.hero h1 {
+  font-size: 42px;
+  margin-bottom: 10px;
+}
+
+.hero p {
+  font-size: 18px;
+  color: #cbd5f5;
+}
+
+/* =====================================================
+   4. CARD CONTAINER
+===================================================== */
 .card {
-  background: #fff;
+  max-width: 1200px;
+  margin: 30px auto;
+  background: #ffffff;
+  color: #111827;
   border-radius: 16px;
   padding: 28px;
-  box-shadow: 0 20px 50px rgba(0,0,0,0.18);
+  box-shadow: 0 25px 50px rgba(0,0,0,0.25);
 }
 
-/* ================= HERO ================= */
-#home {
-  text-align: center;
-  color: white;
-  padding: 80px 20px;
-}
-#home h1 {
-  font-size: 52px;
-  margin-bottom: 16px;
-}
-#home p {
-  font-size: 20px;
-  opacity: 0.9;
-}
-#home button {
-  margin-top: 32px;
-  padding: 16px 36px;
-  font-size: 18px;
-  border-radius: 12px;
-  border: none;
-  cursor: pointer;
-  background: linear-gradient(135deg,#1e90ff,#0f6fd9);
-  color: #fff;
-}
-
-/* ================= MAP ================= */
+/* =====================================================
+   5. MAP
+===================================================== */
 #map {
   height: 420px;
-  border-radius: 14px;
+  border-radius: 12px;
   margin-bottom: 20px;
 }
 
-/* ================= CONTROLS ================= */
+/* =====================================================
+   6. CONTROLS
+===================================================== */
 .controls {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
+  margin-bottom: 20px;
 }
-input {
+
+.controls input {
   padding: 12px;
-  border-radius: 10px;
-  border: 2px solid #e2e6ea;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
   font-size: 15px;
-  width: 160px;
+  width: 170px;
 }
-input[readonly] {
-  background: #f5f6f8;
-  user-select: none;
-  caret-color: transparent;
-}
-button.primary {
-  padding: 12px 26px;
-  border-radius: 10px;
-  border: none;
-  font-size: 16px;
-  font-weight: 700;
-  background: linear-gradient(135deg,#1e90ff,#0f6fd9);
+
+.controls button {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
   color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 26px;
+  font-weight: 700;
   cursor: pointer;
 }
-button.primary:disabled { opacity: 0.5; }
 
-/* ================= STATUS ================= */
-#status {
-  margin-top: 16px;
-  padding: 12px;
-  border-radius: 10px;
-  font-weight: 600;
+.controls button:hover {
+  transform: translateY(-1px);
 }
-.loading { background:#fff3cd; }
-.error { background:#f8d7da; }
-.success { background:#d4edda; }
 
-/* ================= MODAL ================= */
-.modal-overlay {
+/* =====================================================
+   7. STATUS
+===================================================== */
+#status {
+  padding: 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  display: none;
+}
+
+.loading { background:#fef3c7; color:#92400e; }
+.error   { background:#fee2e2; color:#991b1b; }
+.success { background:#dcfce7; color:#166534; }
+
+/* =====================================================
+   8. MODAL
+===================================================== */
+.modal {
+  display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.55);
-  backdrop-filter: blur(6px);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  z-index: 999;
 }
-.modal {
+
+.modal-content {
   background: white;
-  width: min(96vw,1200px);
-  max-height: 85vh;
-  overflow-y: auto;
-  border-radius: 18px;
+  color: #111827;
+  width: 92%;
+  max-width: 1200px;
+  margin: 6vh auto;
+  border-radius: 16px;
   padding: 26px;
-  box-shadow: 0 30px 80px rgba(0,0,0,0.4);
-}
-.close-btn {
-  float: right;
-  font-size: 28px;
-  background: none;
-  border: none;
-  cursor: pointer;
+  animation: rise 0.25s ease-out;
 }
 
-/* ================= TABLE COLORS ================= */
-.color-5 { background:#d73027;color:#fff }
-.color-4 { background:#f46d43;color:#fff }
-.color-3 { background:#fdae61 }
-.color-2 { background:#abd9e9 }
-.color-1 { background:#d1f2eb }
-.color-0 { background:#f8f9fa }
+@keyframes rise {
+  from { transform: translateY(30px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
 
-/* ================= FAQ ================= */
-#faq h3 { margin-top: 24px; }
-#faq p { color:#555; }
+/* =====================================================
+   9. TABLE
+===================================================== */
+table.dataTable {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+}
+
+.color-5 { background:#7f1d1d;color:#fff }
+.color-4 { background:#b91c1c;color:#fff }
+.color-3 { background:#f59e0b }
+.color-2 { background:#93c5fd }
+.color-1 { background:#dbeafe }
+.color-0 { background:#f9fafb }
+
+/* =====================================================
+   10. FOOTER
+===================================================== */
+footer {
+  text-align: center;
+  padding: 30px;
+  color: #94a3b8;
+  font-size: 14px;
+}
 </style>
 </head>
 
 <body>
 
+<!-- NAV -->
 <nav>
   <div class="logo">🌍 Climate Risk</div>
   <div>
-    <a href="#home">Home</a>
-    <a href="#product">Product</a>
+    <a href="#">Home</a>
+    <a href="#">Product</a>
     <a href="#faq">FAQ</a>
   </div>
 </nav>
 
-<section id="home">
+<!-- HERO -->
+<div class="hero">
   <h1>Free Climate Risk Scan</h1>
-  <p>Site-specific climate hazard assessment using ERA5, CMIP6 & Aqueduct</p>
-  <button onclick="document.getElementById('product').scrollIntoView({behavior:'smooth'})">
-    Start Free Scan
-  </button>
-</section>
+  <p>Instant climate hazard profile for any location on Earth</p>
+</div>
 
-<section id="product">
-  <div class="card">
-    <h2>Select a location</h2>
-    <div id="map"></div>
+<!-- MAIN CARD -->
+<div class="card">
+  <h3>① Select Location</h3>
+  <div id="map"></div>
 
-    <div class="controls">
-      <input id="lat" placeholder="Latitude" readonly>
-      <input id="lon" placeholder="Longitude" readonly>
-      <input id="city" placeholder="City (optional)">
-      <button id="computeBtn" class="primary" disabled onclick="compute()">🚀 Compute Risk</button>
-    </div>
-
-    <div id="status"></div>
+  <h3>② Run Climate Model</h3>
+  <div class="controls">
+    <input id="lat" placeholder="Latitude" readonly>
+    <input id="lon" placeholder="Longitude" readonly>
+    <input id="city" placeholder="City (optional)">
+    <button onclick="compute()">🚀 Run Climate Model</button>
   </div>
-</section>
 
-<section id="faq">
-  <div class="card">
-    <h2>FAQ</h2>
+  <div id="status"></div>
+</div>
 
-    <h3>What does this tool calculate?</h3>
-    <p>It evaluates chronic and extreme climate hazards including heat, cold, drought, flood, cyclone, wildfire and water stress.</p>
-
-    <h3>What datasets are used?</h3>
-    <p>ERA5 (observed), CMIP6 (future scenarios), WRI Aqueduct, IPCC AR6 sea-level multipliers.</p>
-
-    <h3>How long does one location take?</h3>
-    <p>Typically <b>3–10 minutes per location</b>, depending on model complexity and data availability.</p>
-
-    <h3>Is this free?</h3>
-    <p>This scan is free for exploration and early risk screening.</p>
-  </div>
-</section>
-
-<!-- ================= MODAL ================= -->
-<div id="modalOverlay" class="modal-overlay">
-  <div class="modal">
-    <button class="close-btn" onclick="closeModal()">×</button>
-    <div id="modalContent"></div>
+<!-- MODAL -->
+<div class="modal" id="modal">
+  <div class="modal-content">
+    <h3 id="resultTitle"></h3>
+    <table id="hazardTable" class="display" style="width:100%">
+      <thead><tr><th>Hazard</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <br>
+    <button onclick="closeModal()">Close</button>
   </div>
 </div>
 
+<!-- FAQ -->
+<div class="card" id="faq">
+  <h2>FAQ</h2>
+  <p><b>How long does one scan take?</b><br>3–10 minutes depending on location and model complexity.</p>
+  <p><b>What models are used?</b><br>ERA5 observations and CMIP6 SSP scenarios.</p>
+  <p><b>Is this free?</b><br>Yes — limited to single-location scans.</p>
+</div>
+
+<footer>
+  © Climate Risk Platform — Scientific climate intelligence
+</footer>
+
 <script>
-let map, marker=null;
+let map, marker;
 
-function initMap(){
-  map = L.map('map',{center:[20,0],zoom:2});
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    attribution:'© OpenStreetMap'
-  }).addTo(map);
+function initMap() {
+  map = L.map('map').setView([20,0], 2);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-  map.on('click', e=>{
-    const lat=e.latlng.lat.toFixed(5);
-    const lon=e.latlng.lng.toFixed(5);
-    const latI=document.getElementById('lat');
-    const lonI=document.getElementById('lon');
-
-    latI.value=lat;
-    lonI.value=lon;
-    latI.blur(); lonI.blur();
-    window.getSelection()?.removeAllRanges();
-
-    if(marker) marker.setLatLng(e.latlng);
-    else marker=L.marker(e.latlng).addTo(map);
-
-    document.getElementById('computeBtn').disabled=false;
-    showStatus(`📍 Location selected: ${lat}, ${lon}`,'success');
+  map.on('click', e => {
+    document.getElementById('lat').value = e.latlng.lat.toFixed(5);
+    document.getElementById('lon').value = e.latlng.lng.toFixed(5);
+    marker ? marker.setLatLng(e.latlng) : marker = L.marker(e.latlng).addTo(map);
   });
 }
 
-function showStatus(msg,type){
-  const s=document.getElementById('status');
-  s.textContent=msg;
-  s.className=type;
+function showStatus(msg, cls){
+  const s = document.getElementById('status');
+  s.textContent = msg;
+  s.className = cls;
+  s.style.display = 'block';
 }
 
 async function compute(){
-  const lat=lat.value, lon=lon.value, city=city.value.trim();
-  showStatus('🔄 Computing climate risk…','loading');
+  showStatus("⏳ Running climate models (this may take several minutes)…", "loading");
 
-  try{
-    const res=await fetch(`/run?lat=${lat}&lon=${lon}&city=${encodeURIComponent(city)}`);
-    const json=await res.json();
-    renderTable(json.data,json.columns,city,lat,lon);
-    showStatus('✅ Completed','success');
-  }catch(e){
-    showStatus('❌ Error computing risk','error');
-  }
+  const lat = lat.value, lon = lon.value;
+  const res = await fetch(`/run?lat=${lat}&lon=${lon}`);
+  const json = await res.json();
+
+  renderTable(json.data, json.columns);
+  showStatus("✅ Scan complete", "success");
+  document.getElementById('modal').style.display = 'block';
 }
 
-function openModal(){ modalOverlay.style.display='flex'; }
-function closeModal(){ modalOverlay.style.display='none'; }
+function renderTable(data, columns){
+  $('#hazardTable').DataTable().destroy();
 
-function scoreClass(v){
-  if(v==null) return 'color-0';
-  if(v>=4) return 'color-5';
-  if(v>=3) return 'color-4';
-  if(v>=2) return 'color-3';
-  if(v>=1) return 'color-2';
-  return 'color-1';
+  $('#hazardTable thead tr').html(
+    '<th>Hazard</th>' + columns.slice(1).map(c=>`<th>${c}</th>`).join('')
+  );
+
+  $('#hazardTable tbody').html(
+    data.map(r=>{
+      return `<tr><td>${r.Hazard}</td>` +
+        columns.slice(1).map(c=>{
+          const v = r[c];
+          return `<td class="color-${Math.floor(v||0)}">${v?.toFixed(2)||'—'}</td>`;
+        }).join('') +
+      `</tr>`;
+    }).join('')
+  );
+
+  $('#hazardTable').DataTable({ paging:false, scrollX:true });
 }
 
-function renderTable(data,cols,city,lat,lon){
-  modalContent.innerHTML=`
-    <h3>${city||'Selected Location'} (${lat},${lon})</h3>
-    <table id="hazardTable" class="display" style="width:100%"></table>`;
-  openModal();
-
-  $('#hazardTable').DataTable({
-    data:data,
-    columns:cols.map((c,i)=>({
-      title:c,
-      data:c,
-      render:(v)=> i===0?`<b>${v}</b>`:
-        `<div class="${scoreClass(v)}" style="text-align:center">${v?.toFixed?.(2)||'—'}</div>`
-    })),
-    paging:false,
-    scrollX:true
-  });
+function closeModal(){
+  document.getElementById('modal').style.display = 'none';
 }
 
-document.addEventListener('DOMContentLoaded',initMap);
+document.addEventListener('DOMContentLoaded', initMap);
 </script>
 
 </body>
