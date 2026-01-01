@@ -51,6 +51,21 @@ def ensure_ee_initialized():
     logging.info("🌍 Earth Engine initialized (service account)")
     EE_INITIALIZED = True
 
+
+# --- CONFIGURATION ---
+EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
+EPOCH_MIDPOINTS = {'2030s': 2030, '2050s': 2050, '2080s': 2080}
+
+ERA5_RANGE = ('1980-01-01', '2024-12-31')
+CMIP6_HIST_RANGE = ('1980-01-01', '2014-12-31')
+CMIP6_FUT_RANGE = ('2025-01-01', '2085-12-31')
+MODEL = 'MPI-ESM1-2-HR'
+CHUNK_SIZE_YEARS = 10
+MAX_WORKERS = 8
+
+# -------------------------------------------------------------------------
+# 1. SPATIAL CLIMATE ENGINE
+# -------------------------------------------------------------------------
 def safe_to_float(val, default=0.3):
     """Safely convert values to float with fallback"""
     if val is None:
@@ -62,48 +77,10 @@ def safe_to_float(val, default=0.3):
         return v
     except Exception:
         return default
-
-def robust_datetime(df):
-            """Convert 'time' column to 'date' robustly across formats."""
-            time_col = df['time'].dropna()
-            
-            # Try common numeric units (ms most common for EE)
-            for unit in ['ms', 's', 'ns', 'us']:
-                try:
-                    test_dates = pd.to_datetime(time_col.head(5), unit=unit, errors='raise')
-                    if test_dates.min() > pd.Timestamp('1900-01-01') and test_dates.max() < pd.Timestamp('2100-01-01'):
-                        df['date'] = pd.to_datetime(df['time'], unit=unit, errors='coerce')
-                        valid_pct = df['date'].notna().mean()
-                        if valid_pct > 0.9:  # 90% success threshold
-                            return df.dropna(subset=['date'])
-                except:
-                    continue
-            
-            # Fallback: infer format (strings/ISO/mixed)
-            df['date'] = pd.to_datetime(df['time'], errors='coerce', infer_datetime_format=True)
-            return df.dropna(subset=['date'])
-    
-# --- CONFIGURATION ---
-EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
-EPOCH_MIDPOINTS = {'2030s': 2030, '2050s': 2050, '2080s': 2080}
-
-ERA5_RANGE = ('1960-01-01', '2024-12-31')
-CMIP6_HIST_RANGE = ('1960-01-01', '2014-12-31')
-CMIP6_FUT_RANGE = ('2025-01-01', '2085-12-31')
-MODEL = 'MPI-ESM1-2-HR'
-CHUNK_SIZE_YEARS = 15
-MAX_WORKERS = 2
-
-# -------------------------------------------------------------------------
-# 1. SPATIAL CLIMATE ENGINE
-# -------------------------------------------------------------------------
+        
 def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=None):
     try:
-        coll = (
-            ee.ImageCollection(collection_id)
-            .filterDate(start, end)
-        )
-
+        coll = ee.ImageCollection(collection_id).filterDate(start, end)
         if model: coll = coll.filterMetadata('model', 'equals', model)
         if scenario: coll = coll.filterMetadata('scenario', 'equals', scenario)
         coll = coll.select(bands)
@@ -127,10 +104,8 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
             rows.append(row)
 
         df = pd.DataFrame(rows)
-        
-        # Usage
-        df = robust_datetime(df)
-        
+        df['date'] = pd.to_datetime(df['time'], unit='ms')
+
         for b in ['temperature_2m', 'temperature_2m_max', 'temperature_2m_min', 'tas', 'tasmax', 'tasmin']:
             if b in df.columns:
                 df[b] = pd.to_numeric(df[b], errors='coerce')
@@ -696,7 +671,6 @@ def run_for_point(lat: float, lon: float):
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
 
-                                    
-
+                                     
 
 
