@@ -18,9 +18,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
-/* =====================================================
-   1. GLOBAL BASE
-===================================================== */
 * { box-sizing: border-box; }
 
 body {
@@ -30,153 +27,121 @@ body {
   color: #e5e7eb;
 }
 
-/* =====================================================
-   2. NAVBAR
-===================================================== */
+/* ================= NAV ================= */
 nav {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 18px 40px;
+  padding: 18px 32px;
 }
-
-nav .logo {
-  font-weight: 700;
-  font-size: 20px;
-  letter-spacing: 0.5px;
-}
-
+nav .logo { font-weight: 700; font-size: 20px; }
 nav a {
   color: #c7d2fe;
-  margin-left: 28px;
+  margin-left: 24px;
   text-decoration: none;
   font-weight: 600;
 }
+nav a:hover { color: #fff; }
 
-nav a:hover { color: #ffffff; }
-
-/* =====================================================
-   3. HERO
-===================================================== */
+/* ================= HERO ================= */
 .hero {
   text-align: center;
-  padding: 70px 20px 40px;
+  padding: 60px 16px 32px;
 }
+.hero h1 { font-size: 42px; margin-bottom: 10px; }
+.hero p { font-size: 18px; color: #cbd5f5; }
 
-.hero h1 {
-  font-size: 42px;
-  margin-bottom: 10px;
-}
-
-.hero p {
-  font-size: 18px;
-  color: #cbd5f5;
-}
-
-/* =====================================================
-   4. CARD CONTAINER
-===================================================== */
+/* ================= CARD ================= */
 .card {
   max-width: 1200px;
-  margin: 30px auto;
+  margin: 28px auto;
   background: #ffffff;
   color: #111827;
   border-radius: 16px;
-  padding: 28px;
+  padding: 26px;
   box-shadow: 0 25px 50px rgba(0,0,0,0.25);
 }
 
-/* =====================================================
-   5. MAP
-===================================================== */
+/* ================= MAP ================= */
 #map {
   height: 420px;
   border-radius: 12px;
   margin-bottom: 20px;
 }
 
-/* =====================================================
-   6. CONTROLS
-===================================================== */
+/* ================= CONTROLS ================= */
 .controls {
   display: flex;
   gap: 14px;
   flex-wrap: wrap;
-  margin-bottom: 20px;
 }
-
+.controls input,
+.controls button {
+  padding: 14px;
+  font-size: 16px;
+  border-radius: 10px;
+}
 .controls input {
-  padding: 12px;
-  border-radius: 8px;
   border: 1px solid #d1d5db;
-  font-size: 15px;
-  width: 170px;
+  width: 180px;
 }
-
 .controls button {
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
   color: white;
   border: none;
-  border-radius: 10px;
-  padding: 12px 26px;
   font-weight: 700;
   cursor: pointer;
+  min-height: 44px;
+}
+.controls button:disabled {
+  opacity: 0.6;
 }
 
-.controls button:hover {
-  transform: translateY(-1px);
-}
-
-/* =====================================================
-   7. STATUS
-===================================================== */
+/* ================= STATUS ================= */
 #status {
+  margin-top: 16px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-weight: 600;
   display: none;
 }
-
 .loading { background:#fef3c7; color:#92400e; }
 .error   { background:#fee2e2; color:#991b1b; }
 .success { background:#dcfce7; color:#166534; }
 
-/* =====================================================
-   8. MODAL
-===================================================== */
+/* ================= MODAL ================= */
 .modal {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0,0,0,0.65);
   backdrop-filter: blur(4px);
   z-index: 999;
+  overflow-y: auto;
+  padding-bottom: env(safe-area-inset-bottom);
 }
-
 .modal-content {
   background: white;
   color: #111827;
-  width: 92%;
+  width: 94%;
   max-width: 1200px;
   margin: 6vh auto;
   border-radius: 16px;
-  padding: 26px;
-  animation: rise 0.25s ease-out;
+  padding: 24px;
+}
+.modal-close {
+  float: right;
+  font-size: 20px;
+  background: none;
+  border: none;
+  cursor: pointer;
 }
 
-@keyframes rise {
-  from { transform: translateY(30px); opacity: 0; }
-  to   { transform: translateY(0); opacity: 1; }
-}
-
-/* =====================================================
-   9. TABLE
-===================================================== */
+/* ================= TABLE (DESKTOP) ================= */
 table.dataTable {
   font-family: "IBM Plex Mono", monospace;
   font-size: 13px;
 }
-
 .color-5 { background:#7f1d1d;color:#fff }
 .color-4 { background:#b91c1c;color:#fff }
 .color-3 { background:#f59e0b }
@@ -184,21 +149,55 @@ table.dataTable {
 .color-1 { background:#dbeafe }
 .color-0 { background:#f9fafb }
 
-/* =====================================================
-   10. FOOTER
-===================================================== */
+/* ================= MOBILE RESULT CARDS ================= */
+.mobile-cards { display: none; }
+.card-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.card-row h4 {
+  margin: 0 0 8px;
+}
+
+/* ================= FOOTER ================= */
 footer {
   text-align: center;
   padding: 30px;
   color: #94a3b8;
   font-size: 14px;
 }
+
+/* ================= RESPONSIVE ================= */
+@media (max-width: 768px) {
+  nav { padding: 14px 16px; }
+  nav a { margin-left: 16px; }
+
+  .hero h1 { font-size: 30px; }
+  .hero p { font-size: 16px; }
+
+  #map { height: 300px; }
+
+  .controls input,
+  .controls button {
+    width: 100%;
+  }
+
+  #status {
+    position: sticky;
+    top: 10px;
+    z-index: 10;
+  }
+
+  table.dataTable { display: none; }
+  .mobile-cards { display: block; }
+}
 </style>
 </head>
 
 <body>
 
-<!-- NAV -->
 <nav>
   <div class="logo">🌍 Climate Risk</div>
   <div>
@@ -208,13 +207,11 @@ footer {
   </div>
 </nav>
 
-<!-- HERO -->
 <div class="hero">
   <h1>Free Climate Risk Scan</h1>
   <p>Instant climate hazard profile for any location on Earth</p>
 </div>
 
-<!-- MAIN CARD -->
 <div class="card">
   <h3>① Select Location</h3>
   <div id="map"></div>
@@ -224,7 +221,7 @@ footer {
     <input id="lat" placeholder="Latitude" readonly>
     <input id="lon" placeholder="Longitude" readonly>
     <input id="city" placeholder="City (optional)">
-    <button onclick="compute()">🚀 Run Climate Model</button>
+    <button id="runBtn" onclick="compute()">🚀 Run Climate Model</button>
   </div>
 
   <div id="status"></div>
@@ -233,22 +230,23 @@ footer {
 <!-- MODAL -->
 <div class="modal" id="modal">
   <div class="modal-content">
+    <button class="modal-close" onclick="closeModal()">✕</button>
     <h3 id="resultTitle"></h3>
+
     <table id="hazardTable" class="display" style="width:100%">
       <thead><tr><th>Hazard</th></tr></thead>
       <tbody></tbody>
     </table>
-    <br>
-    <button onclick="closeModal()">Close</button>
+
+    <div class="mobile-cards" id="mobileCards"></div>
   </div>
 </div>
 
-<!-- FAQ -->
 <div class="card" id="faq">
   <h2>FAQ</h2>
-  <p><b>How long does one scan take?</b><br>3–10 minutes depending on location and model complexity.</p>
-  <p><b>What models are used?</b><br>ERA5 observations and CMIP6 SSP scenarios.</p>
-  <p><b>Is this free?</b><br>Yes — limited to single-location scans.</p>
+  <p><b>How long does one scan take?</b><br>3–10 minutes depending on location.</p>
+  <p><b>What models are used?</b><br>ERA5 observations + CMIP6 SSP scenarios.</p>
+  <p><b>Is this free?</b><br>Yes — limited single-location scans.</p>
 </div>
 
 <footer>
@@ -261,10 +259,9 @@ let map, marker;
 function initMap() {
   map = L.map('map').setView([20,0], 2);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-
   map.on('click', e => {
-    document.getElementById('lat').value = e.latlng.lat.toFixed(5);
-    document.getElementById('lon').value = e.latlng.lng.toFixed(5);
+    lat.value = e.latlng.lat.toFixed(5);
+    lon.value = e.latlng.lng.toFixed(5);
     marker ? marker.setLatLng(e.latlng) : marker = L.marker(e.latlng).addTo(map);
   });
 }
@@ -277,41 +274,57 @@ function showStatus(msg, cls){
 }
 
 async function compute(){
-  showStatus("⏳ Running climate models (this may take several minutes)…", "loading");
+  if (!lat.value || !lon.value) {
+    showStatus("❗ Select a location first", "error"); return;
+  }
 
-  const lat = lat.value, lon = lon.value;
-  const res = await fetch(`/run?lat=${lat}&lon=${lon}`);
+  runBtn.disabled = true;
+  runBtn.textContent = "⏳ Computing…";
+  showStatus("🔄 Running climate models (3–10 min)…", "loading");
+
+  const res = await fetch(`/run?lat=${lat.value}&lon=${lon.value}`);
   const json = await res.json();
 
-  renderTable(json.data, json.columns);
+  renderResults(json.data, json.columns);
   showStatus("✅ Scan complete", "success");
-  document.getElementById('modal').style.display = 'block';
+  modal.style.display = 'block';
+
+  runBtn.disabled = false;
+  runBtn.textContent = "🚀 Run Climate Model";
 }
 
-function renderTable(data, columns){
-  $('#hazardTable').DataTable().destroy();
-
+function renderResults(data, columns){
+  // Desktop table
+  if ($.fn.DataTable.isDataTable('#hazardTable')) {
+    $('#hazardTable').DataTable().destroy();
+  }
   $('#hazardTable thead tr').html(
     '<th>Hazard</th>' + columns.slice(1).map(c=>`<th>${c}</th>`).join('')
   );
-
   $('#hazardTable tbody').html(
-    data.map(r=>{
-      return `<tr><td>${r.Hazard}</td>` +
-        columns.slice(1).map(c=>{
-          const v = r[c];
-          return `<td class="color-${Math.floor(v||0)}">${v?.toFixed(2)||'—'}</td>`;
-        }).join('') +
-      `</tr>`;
-    }).join('')
+    data.map(r=>`
+      <tr>
+        <td>${r.Hazard}</td>
+        ${columns.slice(1).map(c=>{
+          const v=r[c];
+          return `<td class="color-${Math.floor(v??0)}">${v==null?'—':v.toFixed(2)}</td>`;
+        }).join('')}
+      </tr>`).join('')
   );
-
   $('#hazardTable').DataTable({ paging:false, scrollX:true });
+
+  // Mobile cards
+  mobileCards.innerHTML = data.map(r=>`
+    <div class="card-row">
+      <h4>${r.Hazard}</h4>
+      ${columns.slice(1).map(c=>{
+        const v=r[c];
+        return `<div><b>${c}:</b> ${v==null?'—':v.toFixed(2)}</div>`;
+      }).join('')}
+    </div>`).join('');
 }
 
-function closeModal(){
-  document.getElementById('modal').style.display = 'none';
-}
+function closeModal(){ modal.style.display = 'none'; }
 
 document.addEventListener('DOMContentLoaded', initMap);
 </script>
