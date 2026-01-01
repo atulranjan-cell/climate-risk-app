@@ -8,10 +8,6 @@ import numpy as np
 import time
 from contextlib import asynccontextmanager
 from hazards import run_for_point
-import os
-import json
-import ee
-import tempfile
 
 # Logging setup
 logging.basicConfig(
@@ -19,38 +15,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-# =================================================
-# EARTH ENGINE INITIALIZATION (Render-safe)
-# =================================================
-
-_EE_INITIALIZED = False
-
-def init_ee():
-    global _EE_INITIALIZED
-    if _EE_INITIALIZED:
-        return
-
-    service_account_info = json.loads(
-        os.environ["GCP_SERVICE_ACCOUNT"]
-    )
-
-    with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
-        json.dump(service_account_info, f)
-        key_path = f.name
-
-    credentials = ee.ServiceAccountCredentials(
-        service_account_info["client_email"],
-        key_path
-    )
-
-    ee.Initialize(
-        credentials,
-        project=service_account_info["project_id"],
-        url="https://earthengine-highvolume.googleapis.com"
-    )
-
-    logger.info("🌍 Earth Engine initialized successfully")
-    _EE_INITIALIZED = True
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -127,7 +91,6 @@ async def run_hazards(lat: float, lon: float, city: Optional[str] = None):
         raise HTTPException(status_code=400, detail="Longitude must be between -180 and 180")
     
     try:
-        init_ee()
         start_time = time.time()
         logger.info(f":rocket: Computing hazards for {lat:.4f}, {lon:.4f} ({city or 'unknown'})")
         
