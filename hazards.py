@@ -68,55 +68,79 @@ def safe_to_float(val, default=0.3):
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
 EPOCH_MIDPOINTS = {'2030s': 2030, '2050s': 2050, '2080s': 2080}
 
-ERA5_RANGE = ('1980-01-01', '2024-12-31')
-CMIP6_HIST_RANGE = ('1980-01-01', '2014-12-31')
+ERA5_RANGE = ('1960-01-01', '2024-12-31')
+CMIP6_HIST_RANGE = ('1960-01-01', '2014-12-31')
 CMIP6_FUT_RANGE = ('2025-01-01', '2085-12-31')
 MODEL = 'MPI-ESM1-2-HR'
 CHUNK_SIZE_YEARS = 15
-MAX_WORKERS = 2
+MAX_WORKERS = 4
 
 # -------------------------------------------------------------------------
 # 1. SPATIAL CLIMATE ENGINE
 # -------------------------------------------------------------------------
 def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=None):
+    """
+    Annual-only climate extraction (Method 6)
+    Returns: DataFrame with columns ['year', <bands>]
+    """
     try:
         coll = ee.ImageCollection(collection_id).filterDate(start, end)
-        if model: coll = coll.filterMetadata('model', 'equals', model)
-        if scenario: coll = coll.filterMetadata('scenario', 'equals', scenario)
+        if model:
+            coll = coll.filterMetadata('model', 'equals', model)
+        if scenario:
+            coll = coll.filterMetadata('scenario', 'equals', scenario)
+
         coll = coll.select(bands)
 
-        def reduce_to_point(img):
-            stats = img.reduceRegion(
-                reducer=ee.Reducer.mean(),
-                geometry=geom.buffer(5000),
-                scale=25000,
-                bestEffort=True
+        # --- Attach YEAR to each image ---
+        coll = coll.map(
+            lambda img: img.set(
+                'year',
+                ee.Date(img.get('system:time_start')).get('year')
             )
-            return ee.Feature(None, stats).set('system:time_start', img.get('system:time_start'))
+        )
 
-        data_list = coll.map(reduce_to_point).getInfo()['features']
-        if not data_list: return pd.DataFrame()
+        # --- Reduce to annual means ---
+        annual = coll.reduceColumns(
+            reducer=ee.Reducer.mean().group(
+                groupField=1,
+                groupName='year'
+            ),
+            selectors=bands + ['year']
+        )
+
+        groups = ee.List(annual.get('groups')).getInfo()
+        if not groups:
+            return pd.DataFrame()
 
         rows = []
-        for feat in data_list:
-            row = feat['properties'].copy()
-            row['time'] = feat['properties'].get('system:time_start')
+        for g in groups:
+            row = {'year': int(g['year'])}
+            for k, v in g['mean'].items():
+                row[k] = v
             rows.append(row)
 
         df = pd.DataFrame(rows)
-        df['date'] = pd.to_datetime(df['time'], unit='ms')
 
-        for b in ['temperature_2m', 'temperature_2m_max', 'temperature_2m_min', 'tas', 'tasmax', 'tasmin']:
+        # --- Unit fixes ---
+        for b in ['temperature_2m', 'temperature_2m_max', 'temperature_2m_min',
+                  'tas', 'tasmax', 'tasmin']:
             if b in df.columns:
                 df[b] = pd.to_numeric(df[b], errors='coerce')
-                if df[b].mean() > 200: df[b] = df[b] - 273.15
+                if df[b].mean() > 200:
+                    df[b] = df[b] - 273.15
+
         if 'total_precipitation_sum' in df.columns:
             df['pr'] = pd.to_numeric(df['total_precipitation_sum'], errors='coerce') * 1000
         elif 'pr' in df.columns:
             df['pr'] = pd.to_numeric(df['pr'], errors='coerce') * 86400
-        return df
-    except: 
+
+        return df.sort_values('year').reset_index(drop=True)
+
+    except Exception as e:
+        logging.error(f"fetch_chunk failed: {e}")
         return pd.DataFrame()
+
 
 def get_full_series(collection_id, geom, start_date, end_date, bands, model=None, scenario=None):
     start = pd.to_datetime(start_date); end = pd.to_datetime(end_date)
@@ -133,7 +157,9 @@ def get_full_series(collection_id, geom, start_date, end_date, bands, model=None
             df = f.result()
             if not df.empty: dfs.append(df)
     if not dfs: return pd.DataFrame()
-    return pd.concat(dfs).sort_values('date').reset_index(drop=True)
+    df = pd.concat(dfs, ignore_index=True)
+    return df.groupby('year', as_index=False).mean().sort_values('year')
+
 
 def score(val, min_v, max_v, inverted=False):
     if pd.isna(val): return np.nan
@@ -141,18 +167,27 @@ def score(val, min_v, max_v, inverted=False):
     return round(np.clip(n, 0, 1) * 5, 3)
 
 def perform_qm(train_df, hist_df, fut_df, t_col, h_col, f_col):
-    if train_df.empty or hist_df.empty or fut_df.empty: return fut_df[f_col].values
-    obs_vals = train_df[t_col].values; obs_months = train_df['date'].dt.month.values
-    hist_vals = hist_df[h_col].values; hist_months = hist_df['date'].dt.month.values
-    fut_vals = fut_df[f_col].values; fut_months = fut_df['date'].dt.month.values
-    corrected = np.zeros(len(fut_vals))
-    for m in range(1, 13):
-        o_m = np.sort(obs_vals[obs_months == m]); h_m = np.sort(hist_vals[hist_months == m])
-        f_idx = (fut_months == m); f_m = fut_vals[f_idx]
-        if len(o_m) == 0 or len(h_m) == 0 or len(f_m) == 0: corrected[f_idx] = f_m; continue
-        ranks = np.searchsorted(h_m, f_m) / len(h_m)
-        corrected[f_idx] = np.quantile(o_m, np.clip(ranks, 0, 0.9999))
-    return corrected
+    """
+    Annual quantile mapping (Method 6 compatible)
+    Inputs must contain: ['year', <value columns>]
+    """
+    if train_df.empty or hist_df.empty or fut_df.empty:
+        return fut_df[f_col].values
+
+    obs = np.sort(train_df[t_col].values)
+    hist = np.sort(hist_df[h_col].values)
+    fut = fut_df[f_col].values
+
+    # Avoid divide-by-zero
+    if len(obs) < 5 or len(hist) < 5:
+        return fut
+
+    # Map future values to observed distribution
+    ranks = np.searchsorted(hist, fut) / len(hist)
+    ranks = np.clip(ranks, 0.0, 0.999)
+
+    return np.quantile(obs, ranks)
+
 
 # -------------------------------------------------------------------------
 # 2. 🌊 IPCC SEA LEVEL RISE MULTIPLIER
@@ -480,7 +515,7 @@ def run_for_point(lat: float, lon: float):
     )
 
     # ERA5 processing
-    era5 = datasets['era5']; era5['year'] = era5['date'].dt.year
+    era5 = datasets['era5']
     era5_base = era5[(era5['date'] >= '1960-01-01') & (era5['date'] <= '2014-12-31')]
     era5_temp_base = era5_base['temperature_2m'].mean()
     era5_pr_base = era5_base.groupby(era5_base['date'].dt.year)['pr'].sum().mean() or 1.0
@@ -637,7 +672,7 @@ def run_for_point(lat: float, lon: float):
                 }
             else:
                 df = datasets[scenario]
-                sdf = df[(df['date'].dt.year >= sy) & (df['date'].dt.year <= ey)]
+                sdf = df[(df['year'] >= sy) & (df['year'] <= ey)]
                 if sdf.empty: continue
                 mx = perform_qm(era5_base, datasets['hist'], sdf, 'temperature_2m_max', 'tasmax', 'tasmax')
                 mn = perform_qm(era5_base, datasets['hist'], sdf, 'temperature_2m_min', 'tasmin', 'tasmin')
@@ -672,6 +707,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
