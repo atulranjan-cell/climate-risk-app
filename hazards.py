@@ -61,7 +61,7 @@ CMIP6_HIST_RANGE = ('1980-01-01', '2014-12-31')
 CMIP6_FUT_RANGE = ('2025-01-01', '2085-12-31')
 MODEL = 'MPI-ESM1-2-HR'
 CHUNK_SIZE_YEARS = 10
-MAX_WORKERS = 8
+MAX_WORKERS = 4
 
 # -------------------------------------------------------------------------
 # 1. SPATIAL CLIMATE ENGINE
@@ -672,4 +672,5 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
