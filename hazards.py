@@ -11,8 +11,6 @@ from pandas.tseries.offsets import DateOffset
 logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 
-EE_INITIALIZED = False
-
 def safe_to_float(val, default=0.3):
     """Convert EE results safely (handles None)"""
     if val is None:
@@ -21,20 +19,6 @@ def safe_to_float(val, default=0.3):
         return float(val)
     except:
         return default
-
-def ensure_ee_initialized():
-    global EE_INITIALIZED
-    if not EE_INITIALIZED:
-        try:
-            ee.Initialize(project='citric-snow-424111-q0')
-        except:
-            try:
-                ee.Authenticate()
-                ee.Initialize(project='citric-snow-424111-q0')
-            except Exception as e:
-                logging.error(f"EE init failed: {e}")
-                raise
-        EE_INITIALIZED = True
 
 # --- CONFIGURATION ---
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
@@ -396,7 +380,6 @@ def get_fire_cyclone_baselines(geom):
 # 4. MAIN API FUNCTION
 # -------------------------------------------------------------------------
 def run_for_point(lat: float, lon: float):
-    ensure_ee_initialized()
     
     total_start = time.time()
     final_rows = []
@@ -642,5 +625,6 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
 
                                      
