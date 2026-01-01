@@ -56,11 +56,11 @@ def ensure_ee_initialized():
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
 EPOCH_MIDPOINTS = {'2030s': 2030, '2050s': 2050, '2080s': 2080}
 
-ERA5_RANGE = ('1960-01-01', '2024-12-31')
-CMIP6_HIST_RANGE = ('1960-01-01', '2014-12-31')
+ERA5_RANGE = ('1980-01-01', '2024-12-31')
+CMIP6_HIST_RANGE = ('1980-01-01', '2014-12-31')
 CMIP6_FUT_RANGE = ('2025-01-01', '2085-12-31')
 MODEL = 'MPI-ESM1-2-HR'
-CHUNK_SIZE_YEARS = 12
+CHUNK_SIZE_YEARS = 10
 MAX_WORKERS = 4
 
 # -------------------------------------------------------------------------
@@ -272,7 +272,7 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
     earth_radius = 6371000
     lat_rad = np.radians(lat)
     all_points = {}
-    radii_m = [10000, 50000, 100000, 200000]
+    radii_m = [ 100000, 200000]
 
     for radius in radii_m:
         delta_lat = (radius / earth_radius) * (180 / np.pi)
@@ -660,4 +660,5 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
