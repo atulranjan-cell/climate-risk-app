@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Climate Hazard Matrix</title>
+  <title>Free Climate Risk Scan</title>
 
   <!-- jQuery + DataTables -->
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
@@ -14,49 +14,188 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; scroll-behavior: smooth; }
+
     body {
+      margin: 0;
       font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
-      max-width: 1400px; margin: 0 auto; padding: 20px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: #333;
     }
-    .card {
-      background: white; border-radius: 12px; padding: 24px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.2); margin-bottom: 20px;
+
+    /* ================= NAV ================= */
+    .nav {
+      position: fixed;
+      top: 0;
+      width: 100%;
+      padding: 16px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(0,0,0,0.25);
+      backdrop-filter: blur(10px);
+      z-index: 1000;
     }
-    #map {
-      height: 420px;
-      border-radius: 12px;
-      margin-bottom: 20px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+
+    .nav .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: white;
     }
-    .controls {
-      display: flex; gap: 15px; align-items: end; flex-wrap: wrap;
-      margin: 20px 0;
+
+    .nav a {
+      margin-left: 28px;
+      text-decoration: none;
+      color: white;
+      font-weight: 500;
+      opacity: 0.9;
     }
-    input {
-      padding: 12px; border: 2px solid #e1e5e9; border-radius: 8px;
-      font-size: 16px; width: 160px;
+
+    .nav a:hover { opacity: 1; }
+
+    /* ================= HERO ================= */
+    .hero {
+      min-height: 100vh;
+      padding: 120px 40px 60px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      color: white;
     }
-    input[readonly] { background: #f5f6f8; }
-    button {
-      padding: 12px 24px;
-      background: linear-gradient(135deg, #1e90ff, #0f6fd9);
-      color: white; border: none; border-radius: 8px;
-      font-size: 16px; font-weight: 600;
+
+    .hero h1 {
+      font-size: 3.4rem;
+      margin-bottom: 12px;
+    }
+
+    .hero p {
+      font-size: 1.25rem;
+      max-width: 720px;
+      opacity: 0.9;
+    }
+
+    .cta {
+      margin-top: 28px;
+      padding: 16px 42px;
+      font-size: 18px;
+      font-weight: 600;
+      border-radius: 50px;
+      border: none;
       cursor: pointer;
+      color: white;
+      background: linear-gradient(135deg,#00c6ff,#0072ff);
     }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ================= SECTIONS ================= */
+    section {
+      padding: 80px 40px;
+      max-width: 1100px;
+      margin: auto;
+      color: #222;
+    }
+
+    section h2 {
+      text-align: center;
+      font-size: 2.4rem;
+      margin-bottom: 40px;
+    }
+
+    /* ================= FAQ ================= */
+    .faq {
+      background: #fff;
+      border-radius: 16px;
+      padding: 40px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    }
+
+    .faq-item {
+      margin-bottom: 22px;
+    }
+
+    .faq-item h4 {
+      margin-bottom: 6px;
+      font-size: 18px;
+    }
+
+    .faq-item p {
+      margin: 0;
+      color: #555;
+      line-height: 1.5;
+    }
+
+    /* ================= MODAL ================= */
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      z-index: 2000;
+    }
+
+    .modal-content {
+      background: white;
+      margin: 3% auto;
+      padding: 24px;
+      width: 94%;
+      max-width: 1200px;
+      border-radius: 16px;
+    }
+
+    .close {
+      float: right;
+      font-size: 30px;
+      cursor: pointer;
+      color: #666;
+    }
+
+    #map {
+      height: 380px;
+      border-radius: 12px;
+      margin: 15px 0;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 15px 0;
+    }
+
+    input {
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      width: 150px;
+    }
+
+    input[readonly] { background: #f5f6f8; }
+
+    button {
+      padding: 10px 22px;
+      border-radius: 8px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      background: linear-gradient(135deg,#1e90ff,#0f6fd9);
+      color: white;
+    }
+
+    button:disabled { opacity: 0.5; }
+
     #status {
-      margin: 15px 0; padding: 12px;
-      border-radius: 8px; font-weight: 600;
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 8px;
+      font-weight: 600;
     }
-    .loading { background: #fff3cd; color: #856404; }
-    .error { background: #f8d7da; color: #721c24; }
-    .success { background: #d4edda; color: #155724; }
+
+    .loading { background:#fff3cd;color:#856404 }
+    .error { background:#f8d7da;color:#721c24 }
+    .success { background:#d4edda;color:#155724 }
 
     table.dataTable { font-size: 13px; }
+
     .color-5 { background:#d73027;color:#fff }
     .color-4 { background:#f46d43;color:#fff }
     .color-3 { background:#fdae61 }
@@ -67,151 +206,153 @@
 </head>
 
 <body>
-<div class="card">
-  <h1>Climate Hazard Matrix</h1>
-  <p style="color:#666">Click on the map to select a location</p>
 
-  <div id="map"></div>
-
-  <div class="controls">
-    <input id="lat" placeholder="Latitude" readonly>
-    <input id="lon" placeholder="Longitude" readonly>
-    <input id="city" placeholder="City (optional)">
-    <button id="computeBtn" onclick="compute()" disabled>🚀 Compute Hazards</button>
+<!-- ================= NAV ================= -->
+<div class="nav">
+  <div class="logo">Climate Risk Scan</div>
+  <div>
+    <a href="#home">Home</a>
+    <a href="#product">Product</a>
+    <a href="#faq">FAQ</a>
   </div>
+</div>
 
-  <div id="status"></div>
+<!-- ================= HERO ================= -->
+<section id="home" class="hero">
+  <h1>Free Climate Risk Scan</h1>
+  <p>
+    Evaluate physical climate risks for any location using
+    satellite observations, CMIP6 projections, and IPCC-aligned methods.
+  </p>
+  <button class="cta" onclick="openModal()">🌍 Start Free Scan</button>
+</section>
 
-  <div class="card" id="results" style="display:none">
-    <h3 id="resultsTitle"></h3>
-    <table id="hazardTable" class="display" style="width:100%">
-      <thead><tr><th>Hazard</th></tr></thead>
-      <tbody></tbody>
-    </table>
+<!-- ================= PRODUCT ================= -->
+<section id="product">
+  <h2>What This Tool Does</h2>
+  <p style="text-align:center;font-size:18px;color:#333">
+    This tool computes a multi-hazard climate risk matrix including heat,
+    cold, precipitation, drought, flood, wildfire, and cyclone risk using
+    Google Earth Engine, ERA5, CMIP6, and WRI Aqueduct datasets.
+  </p>
+</section>
+
+<!-- ================= FAQ ================= -->
+<section id="faq">
+  <h2>Frequently Asked Questions</h2>
+
+  <div class="faq">
+    <div class="faq-item">
+      <h4>What hazards are included?</h4>
+      <p>
+        The scan covers extreme and chronic heat & cold stress, temperature anomaly,
+        precipitation change, extreme precipitation, drought, riverine flood,
+        coastal flood, wildfire, and cyclone risk.
+      </p>
+    </div>
+
+    <div class="faq-item">
+      <h4>What climate datasets are used?</h4>
+      <p>
+        The tool uses ERA5 reanalysis for observed climate,
+        NASA GDDP-CMIP6 projections for future scenarios,
+        WRI Aqueduct for water-related risks,
+        and IPCC AR6 sea-level rise multipliers.
+      </p>
+    </div>
+
+    <div class="faq-item">
+      <h4>How long does one location take to process?</h4>
+      <p>
+        A single location typically takes <b>3–10 minutes</b>, depending on
+        server load and the complexity of Earth Engine computations.
+      </p>
+    </div>
+
+    <div class="faq-item">
+      <h4>Is this aligned with ESG and climate risk frameworks?</h4>
+      <p>
+        Yes. The outputs are suitable for physical climate risk screening,
+        ESG reporting, TCFD analysis, and preliminary asset-level assessments.
+      </p>
+    </div>
+
+    <div class="faq-item">
+      <h4>Is this a probabilistic loss model?</h4>
+      <p>
+        No. This is a hazard and exposure-based risk screening tool.
+        It does not estimate financial losses or insurance metrics.
+      </p>
+    </div>
+
+    <div class="faq-item">
+      <h4>Is the scan really free?</h4>
+      <p>
+        Yes. The free scan allows anyone to assess climate hazard exposure
+        for individual locations without registration.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MODAL ================= -->
+<div id="scanModal" class="modal">
+  <div class="modal-content">
+    <span class="close" onclick="closeModal()">&times;</span>
+    <h2>Climate Hazard Matrix</h2>
+    <p>Select a location on the map</p>
+
+    <div id="map"></div>
+
+    <div class="controls">
+      <input id="lat" placeholder="Latitude" readonly>
+      <input id="lon" placeholder="Longitude" readonly>
+      <input id="city" placeholder="City (optional)">
+      <button id="computeBtn" onclick="compute()" disabled>🚀 Compute Risk</button>
+    </div>
+
+    <div id="status"></div>
+
+    <div id="results" style="display:none">
+      <h3 id="resultsTitle"></h3>
+      <table id="hazardTable" class="display" style="width:100%">
+        <thead><tr><th>Hazard</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
 <script>
-let map, marker = null;
-let isComputing = false;
+let map, marker = null, isComputing = false;
 
-/* ---------------- MAP ---------------- */
-function initMap() {
-  map = L.map('map', { center:[20,0], zoom:2 });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    attribution:'© OpenStreetMap'
-  }).addTo(map);
+function openModal(){
+  document.getElementById('scanModal').style.display = 'block';
+  setTimeout(()=>map.invalidateSize(),300);
+}
+function closeModal(){
+  document.getElementById('scanModal').style.display = 'none';
+}
 
-  map.on('click', e => {
-    const lat = e.latlng.lat.toFixed(5);
-    const lon = e.latlng.lng.toFixed(5);
-
-    document.getElementById('lat').value = lat;
-    document.getElementById('lon').value = lon;
-
-    if (marker) marker.setLatLng(e.latlng);
-    else marker = L.marker(e.latlng).addTo(map);
-
-    document.getElementById('computeBtn').disabled = false;
-    showStatus(`📍 Location selected: ${lat}, ${lon}`, 'success');
+function initMap(){
+  map = L.map('map',{center:[20,0],zoom:2});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  map.on('click',e=>{
+    const lat=e.latlng.lat.toFixed(5), lon=e.latlng.lng.toFixed(5);
+    latEl.value=lat; lonEl.value=lon;
+    marker?marker.setLatLng(e.latlng):marker=L.marker(e.latlng).addTo(map);
+    computeBtn.disabled=false;
+    showStatus(`📍 Location selected: ${lat}, ${lon}`,'success');
   });
 }
 
-/* ---------------- COMPUTE ---------------- */
-async function compute() {
-  if (isComputing) return;
+const latEl=()=>document.getElementById('lat');
+const lonEl=()=>document.getElementById('lon');
 
-  const lat = document.getElementById('lat').value;
-  const lon = document.getElementById('lon').value;
-  const city = document.getElementById('city').value.trim();
-
-  if (!lat || !lon) {
-    showStatus('❗ Click on the map first', 'error');
-    return;
-  }
-
-  isComputing = true;
-  const btn = document.getElementById('computeBtn');
-  btn.disabled = true;
-  btn.textContent = '⏳ Computing...';
-  showStatus('🔄 Fetching climate data...', 'loading');
-
-  try {
-    const cityParam = city ? `&city=${encodeURIComponent(city)}` : '';
-    const apiUrl = `${window.location.origin}/run?lat=${lat}&lon=${lon}${cityParam}`;
-
-    const res = await fetch(apiUrl);
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP ${res.status}: ${text}`);
-    }
-
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error || 'Unknown backend error');
-
-    renderTable(json.data, json.columns, city, lat, lon);
-    showStatus('✅ Computation complete', 'success');
-    document.getElementById('results').style.display = 'block';
-  } catch (e) {
-    showStatus(`❌ ${e.message}`, 'error');
-  } finally {
-    isComputing = false;
-    btn.disabled = false;
-    btn.textContent = '🚀 Compute Hazards';
-  }
-}
-
-/* ---------------- TABLE ---------------- */
-function scoreClass(v){
-  if(v==null) return 'color-0';
-  if(v>=4) return 'color-5';
-  if(v>=3) return 'color-4';
-  if(v>=2) return 'color-3';
-  if(v>=1) return 'color-2';
-  return 'color-1';
-}
-
-function renderTable(data, columns, city, lat, lon){
-  if ($.fn.DataTable.isDataTable('#hazardTable')) {
-    $('#hazardTable').DataTable().destroy();
-  }
-
-  $('#hazardTable thead tr').html(
-    '<th>Hazard</th>' + columns.slice(1).map(c=>`<th>${c}</th>`).join('')
-  );
-
-  const rows = data.map(r=>{
-    let t = `<tr><td><b>${r.Hazard}</b></td>`;
-    for(let i=1;i<columns.length;i++){
-      const v = r[columns[i]];
-      t += `<td class="${scoreClass(v)}" style="text-align:center">
-        ${v==null?'—':v.toFixed(2)}
-      </td>`;
-    }
-    return t+'</tr>';
-  }).join('');
-
-  $('#hazardTable tbody').html(rows);
-
-  $('#hazardTable').DataTable({
-    paging:false,
-    scrollX:true,
-    order:[[0,'asc']]
-  });
-
-  document.getElementById('resultsTitle').textContent =
-    `${city || 'Selected Location'} (${lat}, ${lon})`;
-}
-
-/* ---------------- STATUS ---------------- */
-function showStatus(msg,type){
-  const s=document.getElementById('status');
-  s.textContent=msg;
-  s.className=type;
-}
+function showStatus(m,t){const s=document.getElementById('status');s.textContent=m;s.className=t;}
 
 document.addEventListener('DOMContentLoaded', initMap);
 </script>
+
 </body>
 </html>
