@@ -63,7 +63,7 @@ MODEL = 'MPI-ESM1-2-HR'
 CHUNK_SIZE_YEARS = 10
 MAX_WORKERS = 8
 
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------------------- 
 # 1. SPATIAL CLIMATE ENGINE
 # -------------------------------------------------------------------------
 def safe_to_float(val, default=0.3):
@@ -77,6 +77,36 @@ def safe_to_float(val, default=0.3):
         return v
     except Exception:
         return default
+
+def aggregate_monthly(df, vars_to_agg):
+    """
+    Convert daily CMIP6 data to monthly means / sums.
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+    df['year'] = df['date'].dt.year
+    df['month'] = df['date'].dt.month
+
+    agg_map = {}
+    for v in vars_to_agg:
+        if v == 'pr':
+            agg_map[v] = 'sum'      # precipitation → sum
+        else:
+            agg_map[v] = 'mean'     # temperature → mean
+
+    monthly = (
+        df.groupby(['year', 'month'], as_index=False)
+          .agg(agg_map)
+    )
+
+    # Recreate a representative date (mid-month)
+    monthly['date'] = pd.to_datetime(
+        dict(year=monthly['year'], month=monthly['month'], day=15)
+    )
+
+    return monthly
         
 def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=None):
     try:
@@ -444,7 +474,23 @@ def run_for_point(lat: float, lon: float):
                              ['tasmax', 'tasmin', 'tas', 'pr'], MODEL, 'ssp245')
         f4 = executor.submit(get_full_series, "NASA/GDDP-CMIP6", geom, CMIP6_FUT_RANGE[0], CMIP6_FUT_RANGE[1],
                              ['tasmax', 'tasmin', 'tas', 'pr'], MODEL, 'ssp585')
-        datasets = {'era5': f1.result(), 'hist': f2.result(), 'ssp245': f3.result(), 'ssp585': f4.result()}
+        
+        era5 = f1.result()
+        hist = f2.result()
+        ssp245 = f3.result()
+        ssp585 = f4.result()
+
+    # 🔥 NEW: aggregate CMIP6 to monthly (ERA5 stays daily)
+    hist = aggregate_monthly(hist, ['tasmax', 'tasmin', 'tas', 'pr'])
+    ssp245 = aggregate_monthly(ssp245, ['tasmax', 'tasmin', 'tas', 'pr'])
+    ssp585 = aggregate_monthly(ssp585, ['tasmax', 'tasmin', 'tas', 'pr'])
+
+    datasets = {
+        'era5': era5,
+        'hist': hist,
+        'ssp245': ssp245,
+        'ssp585': ssp585
+    }
     climate_time = time.time() - climate_start
 
     # ULTRA-PARALLEL: ALL 10 WRI scenarios at once
@@ -462,7 +508,6 @@ def run_for_point(lat: float, lon: float):
     geom_fc = geom.buffer(100_000)
     fire_cyclone_base = get_fire_cyclone_baselines(geom_fc)
 
-    # ndvi = float(fire_cyclone_base.get('NDVI', 0.3)) if fire_cyclone_base.get('NDVI') is not None else 0.3
     ndvi = safe_to_float(fire_cyclone_base.get('NDVI'), 0.3)
     wf_count = float(fire_cyclone_base.get('wf_count', 0))
     storm_count = max(float(fire_cyclone_base.get('storm_count', 0.5)), 0.5)
@@ -670,7 +715,3 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
-
-                                     
-
-
