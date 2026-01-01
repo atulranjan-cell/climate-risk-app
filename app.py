@@ -1,115 +1,128 @@
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-import ee
-import os
-import json
-from google.oauth2 import service_account
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any, Tuple
+import logging
+import numpy as np
+import time
+from contextlib import asynccontextmanager
+from hazards import run_for_point
 
-# =================================================
-# 1. INITIALIZE EARTH ENGINE (RENDER-SAFE)
-# =================================================
-
-# Load service account JSON from environment variable
-sa_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
-
-credentials = service_account.Credentials.from_service_account_info(
-    sa_info,
-    scopes=["https://www.googleapis.com/auth/earthengine"]
+# Logging setup
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
-ee.Initialize(
-    credentials,
-    project="citric-snow-424111-q0",
-    url="https://earthengine-highvolume.googleapis.com"
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info(":earth_africa: Climate Hazard API starting...")
+    yield
+    logger.info(":earth_africa: Climate Hazard API shutting down...")
+
+# :white_check_mark: SIMPLIFIED: No Field() validation in models
+class HazardResponse(BaseModel):
+    success: bool
+    city: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    columns: List[str]
+    data: List[Dict[str, Any]]
+    shape: Tuple[int, int]
+    computation_time_ms: Optional[float] = None
+    hazards_count: int
+
+class HealthResponse(BaseModel):
+    status: str = "ok"
+    version: str = "1.0.0"
+    hazards: List[str] = [
+        "Extreme Heat", "Chronic Heat Stress", "Extreme Cold", "Chronic Cold Stress",
+        "Temperature Anomaly", "Precipitation Change", "Extreme Precipitation",
+        "Water Stress", "Drought Risk", "Seasonal Variability", "Interannual Variability",
+        "Riverine Flood Risk", "Coastal Flood Risk", "Wildfire", "Cyclone"
+    ]
+
+app = FastAPI(
+    title=":earth_africa: Climate Hazard Matrix API",
+    description="Compute 15+ climate hazard scores for any lat/lon using Google Earth Engine + WRI Aqueduct",
+    version="1.0.0",
+    lifespan=lifespan
 )
-
-# =================================================
-# 2. LOAD AQUEDUCT DATASET
-# =================================================
-
-AQUEDUCT_FC = ee.FeatureCollection(
-    "WRI/Aqueduct_Water_Risk/V4/baseline_annual"
-)
-
-# =================================================
-# 3. FASTAPI APP
-# =================================================
-
-app = FastAPI(title="Climate Risk Tool")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# =================================================
-# 4. SERVE FRONTEND
-# =================================================
+app.mount("/ui", StaticFiles(directory="static", html=True), name="static")
 
 @app.get("/")
-def home():
-    return FileResponse("static/index.html")
-
-# =================================================
-# 5. HELPER: NEAREST VALID BASIN LOOKUP
-# =================================================
-
-def nearest_valid_value(lat, lon, field, search_radius_m=100_000):
-    """
-    Atlas-aligned lookup:
-    - buffer search
-    - ignore -9999
-    - nearest valid basin
-    """
-
-    point = ee.Geometry.Point([lon, lat])
-
-    nearby = AQUEDUCT_FC.filterBounds(
-        point.buffer(search_radius_m)
-    ).filter(
-        ee.Filter.neq(field, -9999)
-    )
-
-    basin = nearby.map(
-        lambda f: f.set(
-            "dist", f.geometry().distance(point)
-        )
-    ).sort("dist").first()
-
-    value = ee.Algorithms.If(basin, basin.get(field), None)
-    return value.getInfo()
-
-# =================================================
-# 6. AQUEDUCT SCORE GENERATOR (ATLAS-ALIGNED)
-# =================================================
-
-def get_aqueduct_risks(lat: float, lon: float):
-    """
-    Returns Aqueduct risks consistent with Aqueduct Atlas UI
-    """
-
+async def root():
     return {
-        "water_stress_category": nearest_valid_value(lat, lon, "bws_cat"),
-        "drought_risk_score": nearest_valid_value(lat, lon, "drr_score"),
-        "river_flood_risk_score": nearest_valid_value(lat, lon, "rfr_score"),
-        "coastal_flood_risk_score": nearest_valid_value(lat, lon, "cfr_score"),
-        "source": "WRI Aqueduct v4 (Atlas-aligned)",
-        "units": "0–5 scale (category for water stress)"
+        "message": ":earth_africa: Climate Hazard Matrix API",
+        "endpoints": {
+            "health": "/health",
+            "run": "/run?lat=25.59&lon=85.14&city=Patna",
+            "ui": "/ui",
+            "docs": "/docs"
+        },
+        "example": "GET /run?lat=25.5941&lon=85.1376&city=Patna"
     }
 
-# =================================================
-# 7. API ENDPOINT
-# =================================================
+@app.get("/health", response_model=HealthResponse)
+async def health():
+    return HealthResponse()
 
-@app.get("/risk")
-def risk(lat: float, lon: float):
-    scores = get_aqueduct_risks(lat, lon)
+# :white_check_mark: FIXED: Manual validation + NO Field() in query params
+@app.get("/run", response_model=HazardResponse)
+async def run_hazards(lat: float, lon: float, city: Optional[str] = None):
+    """
+    Compute climate hazard matrix for lat/lon
+    """
+    # :white_check_mark: MANUAL VALIDATION (FastAPI native way)
+    if not (-90 <= lat <= 90):
+        raise HTTPException(status_code=400, detail="Latitude must be between -90 and 90")
+    if not (-180 <= lon <= 180):
+        raise HTTPException(status_code=400, detail="Longitude must be between -180 and 180")
+    
+    try:
+        start_time = time.time()
+        logger.info(f":rocket: Computing hazards for {lat:.4f}, {lon:.4f} ({city or 'unknown'})")
+        
+        df = run_for_point(lat, lon)
+        df = df.replace([float("inf"), float("-inf"), np.nan], None)
+        
+        computation_time = (time.time() - start_time) * 1000
+        
+        logger.info(f":white_check_mark: Hazards computed in {computation_time:.1f}ms | Shape: {df.shape}")
+        
+        cols = ["Hazard"] + [c for c in df.columns if c != "Hazard"]
+        
+        
+        return {
+            "success": True,
+            "city": city,
+            "lat": lat,
+            "lon": lon,
+            "columns": cols,
+            "data": df[cols].to_dict(orient="records"),
+            "shape": df.shape,
+            "hazards_count": df.shape[0],
+            "computation_time_ms": round((time.time() - start_time) * 1000, 1)
+        }
+    except Exception as e:
+        logger.exception(f":x: Hazard computation failed for {lat}, {lon}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    return {
-        "latitude": lat,
-        "longitude": lon,
-        "scores": scores
-    }
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: Exception):
+    return {"error": "Endpoint not found. Try /docs, /ui, /health, or /run?lat=25.59&lon=85.14"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
