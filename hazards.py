@@ -112,7 +112,10 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
         if 'time' not in df.columns:
             return pd.DataFrame()
         df['date'] = pd.to_datetime(df['time'], unit='ms', errors='coerce')
-        df = df.dropna(subset=['date'])
+        df = df.dropna(
+            subset=['date'],
+            how='any'
+        )
 
 
         for b in ['temperature_2m', 'temperature_2m_max', 'temperature_2m_min', 'tas', 'tasmax', 'tasmin']:
@@ -681,3 +684,4 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                     
+
