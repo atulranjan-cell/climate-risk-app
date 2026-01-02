@@ -284,6 +284,44 @@ function renderTable(data, columns, city, lat, lon){
   document.getElementById('resultTitle').textContent =
     `${city || 'Selected Location'} (${lat}, ${lon})`;
 }
+<script>
+async function compute() {
+  const lat = document.getElementById('lat').value;
+  const lon = document.getElementById('lon').value;
+  const city = document.getElementById('city').value.trim();
+
+  if (!lat || !lon) {
+    alert('Please select a location on the map.');
+    return;
+  }
+
+  const btn = document.getElementById('computeBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Computing...';
+
+  try {
+    const cityParam = city ? `&city=${encodeURIComponent(city)}` : '';
+    const url = `${window.location.origin}/run?lat=${lat}&lon=${lon}${cityParam}`;
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Backend error ${res.status}`);
+
+    const json = await res.json();
+    if (!json.success) {
+      throw new Error(json.detail?.message || 'Computation failed');
+    }
+
+    renderTable(json.data, json.columns, city, lat, lon);
+    document.getElementById('modal').style.display = 'block';
+
+  } catch (e) {
+    alert(`Error: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🚀 Compute Climate Risk';
+  }
+}
+</script>
 
 function closeModal(){ document.getElementById('modal').style.display='none'; }
 document.addEventListener('DOMContentLoaded', initMap);
@@ -291,3 +329,4 @@ document.addEventListener('DOMContentLoaded', initMap);
 
 </body>
 </html>
+
