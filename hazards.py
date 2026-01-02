@@ -472,13 +472,15 @@ def run_for_point(lat: float, lon: float):
         ensure_ee_initialized()
     except HazardError:
         raise
-    coastal_flag = is_coastal(geom)
+    
     total_start = time.time()
     final_rows = []
     WRI_WATER_HAZARDS = ['Water Stress', 'Drought Risk', 'Seasonal Variability', 'Interannual Variability']
 
     print(f"🌍 Processing ({lat:.4f}, {lon:.4f})...")
     geom = ee.Geometry.Point([lon, lat])
+    
+    coastal_flag = is_coastal(geom)
     
     # Climate data fetching (parallel)
     climate_start = time.time()
@@ -785,6 +787,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
