@@ -472,7 +472,7 @@ def run_for_point(lat: float, lon: float):
         ensure_ee_initialized()
     except HazardError:
         raise
-    
+    coastal_flag = is_coastal(geom)
     total_start = time.time()
     final_rows = []
     WRI_WATER_HAZARDS = ['Water Stress', 'Drought Risk', 'Seasonal Variability', 'Interannual Variability']
@@ -588,7 +588,7 @@ def run_for_point(lat: float, lon: float):
         slope, icept, _, _, _ = stats.linregress(ann['year'], ann[col])
         trends[m_name] = {'slope': slope, 'intercept': icept}
 
-    coastal_flag = is_coastal(geom)
+    
 
     def add_row(col_name, metrics, year_proj=None):
         is_obs = 'Observed' in col_name
@@ -785,6 +785,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
