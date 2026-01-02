@@ -162,18 +162,11 @@ footer {
   color: #94a3b8;
   font-size: 14px;
 }
-
-/* ================= MOBILE TWEAKS ================= */
-@media (max-width: 600px) {
-  nav .links a { margin-left: 12px; }
-  .controls button { grid-column: span 1; }
-}
 </style>
 </head>
 
 <body>
 
-<!-- NAV -->
 <nav>
   <div class="logo">🌍 Climate Risk</div>
   <div class="links">
@@ -183,13 +176,11 @@ footer {
   </div>
 </nav>
 
-<!-- HERO -->
 <div class="hero">
   <h1>Free Climate Risk Scan</h1>
   <p>Instant climate hazard profile for any location on Earth</p>
 </div>
 
-<!-- MAIN -->
 <div class="card">
   <h3>① Select Location</h3>
   <div id="map"></div>
@@ -207,7 +198,6 @@ footer {
   <div id="status"></div>
 </div>
 
-<!-- MODAL -->
 <div class="modal" id="modal">
   <div class="modal-content">
     <h3 id="resultTitle"></h3>
@@ -220,7 +210,6 @@ footer {
   </div>
 </div>
 
-<!-- FAQ -->
 <div class="card" id="faq">
   <h2>FAQ</h2>
   <p><b>How long does one scan take?</b><br>3–10 minutes depending on location and model complexity.</p>
@@ -234,89 +223,21 @@ footer {
 
 <script>
 let map, marker = null;
-let isComputing = false;
 
 /* ================= MAP ================= */
 function initMap() {
   map = L.map('map', { center:[20,0], zoom:2 });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    attribution:'© OpenStreetMap'
-  }).addTo(map);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
   map.on('click', e => {
-    const lat = e.latlng.lat.toFixed(5);
-    const lon = e.latlng.lng.toFixed(5);
-
-    document.getElementById('lat').value = lat;
-    document.getElementById('lon').value = lon;
-
+    document.getElementById('lat').value = e.latlng.lat.toFixed(5);
+    document.getElementById('lon').value = e.latlng.lng.toFixed(5);
     marker ? marker.setLatLng(e.latlng) : marker = L.marker(e.latlng).addTo(map);
-
     document.getElementById('computeBtn').disabled = false;
-    showStatus(`📍 Location selected: ${lat}, ${lon}`, 'success');
   });
 }
 
-/* ================= STATUS ================= */
-function showStatus(msg, type){
-  const s = document.getElementById('status');
-  s.textContent = msg;
-  s.className = type;
-  s.style.display = 'block';
-}
-
-/* ================= COMPUTE ================= */
-async function compute() {
-  if (isComputing) return;
-
-  const lat = document.getElementById('lat').value;
-  const lon = document.getElementById('lon').value;
-  const city = document.getElementById('city').value.trim();
-  const btn = document.getElementById('computeBtn');
-
-  if (!lat || !lon) {
-    showStatus('❗ Please select a location on the map first', 'error');
-    return;
-  }
-
-  isComputing = true;
-  btn.disabled = true;
-  btn.textContent = '⏳ Computing...';
-  showStatus('🔄 Running climate models (3–10 minutes)...', 'loading');
-
-  try {
-    const cityParam = city ? `&city=${encodeURIComponent(city)}` : '';
-    const apiUrl = `${window.location.origin}/run?lat=${lat}&lon=${lon}${cityParam}`;
-
-    const res = await fetch(apiUrl);
-    if (!res.ok) throw new Error(`Backend error (${res.status})`);
-
-    const json = await res.json();
-    
-    if (!json.success) {
-      if (json.detail?.error_type === "HAZARD_ERROR") {
-        throw new Error(
-          `Stage: ${json.detail.stage} — ${json.detail.message}`
-        );
-      }
-      throw new Error(json.detail?.message || "Backend failed");
-    }
-
-
-    renderTable(json.data, json.columns, city, lat, lon);
-    showStatus('✅ Scan complete', 'success');
-    document.getElementById('modal').style.display = 'block';
-
-  } catch (e) {
-    showStatus(`❌ Error: ${e.message}`, 'error');
-  } finally {
-    isComputing = false;
-    btn.disabled = false;
-    btn.textContent = '🚀 Compute Climate Risk';
-  }
-}
-
-/* ================= TABLE ================= */
+/* ================= SCORE BANDS ================= */
 function scoreClass(v){
   if(v==null) return 'color-0';
   if(v>=4) return 'color-5';
@@ -326,6 +247,16 @@ function scoreClass(v){
   return 'color-1';
 }
 
+function scoreBandText(v){
+  if(v==null || isNaN(v)) return '—';
+  if(v<=1) return 'Low';
+  if(v<=2) return 'Low–Medium';
+  if(v<=3) return 'Medium';
+  if(v<=4) return 'High';
+  return 'Extremely High';
+}
+
+/* ================= TABLE ================= */
 function renderTable(data, columns, city, lat, lon){
   if ($.fn.DataTable.isDataTable('#hazardTable')) {
     $('#hazardTable').DataTable().destroy();
@@ -341,32 +272,22 @@ function renderTable(data, columns, city, lat, lon){
         <td><b>${r.Hazard}</b></td>
         ${columns.slice(1).map(c=>{
           const v = r[c];
-          return `<td class="${scoreClass(v)}" style="text-align:center">
-            ${v==null?'—':v.toFixed(2)}
+          return `<td class="${scoreClass(v)}" style="text-align:center;font-weight:600">
+            ${scoreBandText(v)}
           </td>`;
         }).join('')}
       </tr>
     `).join('')
   );
 
-  $('#hazardTable').DataTable({
-    paging:false,
-    scrollX:true,
-    order:[[0,'asc']]
-  });
-
+  $('#hazardTable').DataTable({ paging:false, scrollX:true });
   document.getElementById('resultTitle').textContent =
     `${city || 'Selected Location'} (${lat}, ${lon})`;
 }
 
-/* ================= MODAL ================= */
-function closeModal(){
-  document.getElementById('modal').style.display = 'none';
-}
-
+function closeModal(){ document.getElementById('modal').style.display='none'; }
 document.addEventListener('DOMContentLoaded', initMap);
 </script>
 
 </body>
 </html>
-
