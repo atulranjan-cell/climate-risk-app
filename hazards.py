@@ -608,19 +608,19 @@ def run_for_point(lat: float, lon: float):
 
         for h in WRI_WATER_HAZARDS:
 
+           
             # --- Drought Risk ---
             if h == 'Drought Risk':
                 if pd.isna(drr_base_score):
-                    s = np.nan
+                    s = None
                 elif is_obs:
-                    s = None if pd.isna(drr_base_score) or drr_base_score == 0 else drr_base_score
-
+                    s = drr_base_score
                 else:
                     drought_mult = max(
                         0.7,
                         (1 - pr_pct / 100) + (t_anom / 4.0)
                     )
-                    s = None if pd.isna(drr_base_score) else min(5.0, drr_base_score * drought_mult)
+                    s = min(5.0, drr_base_score * drought_mult)
 
 
             # --- Other WRI hazards ---
@@ -814,6 +814,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
