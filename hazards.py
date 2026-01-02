@@ -547,23 +547,23 @@ def run_for_point(lat: float, lon: float):
 
     fuel_mult = np.clip(ndvi / 0.3, 0.5, 1.5)
     wf_base = np.clip((wf_count / 100) * 5, 0.5, 5.0) * fuel_mult
-
+    
+    # --- CYCLONE BASELINE (STRICTLY COASTAL) ---
     if not coastal_flag:
-        cy_base = np.nan
-    
-    elif storm_count is None or pd.isna(storm_count) or storm_count < 1:
-        cy_base = np.nan
-    
+        cy_base = 0.0   # IMPORTANT: zero, not NaN
     else:
-        cy_wind_kmh = max_wind_knots * 1.852
-        rp_years = 34 / storm_count
+        if storm_count is None or pd.isna(storm_count) or storm_count < 1:
+            cy_base = 0.5   # minimal residual coastal risk
+        else:
+            cy_wind_kmh = max_wind_knots * 1.852
+            rp_years = max(5, 34 / storm_count)   # avoid explosive return periods
     
-        damage_potential = (cy_wind_kmh / 150.0) ** 3
+            damage_potential = (cy_wind_kmh / 180.0) ** 3   # higher normalization
     
-        cy_base = (
-            np.clip(damage_potential * 5.0, 0.5, 5.0) * 0.8 +
-            np.clip(15.0 / rp_years, 0.5, 5.0) * 0.2
-        )
+            cy_base = (
+                np.clip(damage_potential * 5.0, 0.5, 4.5) * 0.8 +
+                np.clip(15.0 / rp_years, 0.5, 4.5) * 0.2
+            )
     # ERA5 processing
     era5 = datasets['era5']; era5['year'] = era5['date'].dt.year
     era5_base = era5[(era5['date'] >= '1960-01-01') & (era5['date'] <= '2014-12-31')]
@@ -675,7 +675,10 @@ def run_for_point(lat: float, lon: float):
             cy_sens = 0.08
 
             s_wf = wf_base * (1 + t_anom * wf_sens)
-            s_cy = np.nan if pd.isna(cy_base) else cy_base * (1 + t_anom * cy_sens)
+            if cy_base == 0.0:
+                s_cy = 0.0
+            else:
+                s_cy = cy_base * (1 + t_anom * cy_sens)
 
 
         s_wf = round(min(5.0, s_wf), 3)
@@ -687,6 +690,7 @@ def run_for_point(lat: float, lon: float):
     # Execute Observed 2024
     obs_start = time.time()
     obs_dec = era5[(era5['year'] >= 2015) & (era5['year'] <= 2024)]
+    obs_ann_pr = obs_dec.groupby(obs_dec['date'].dt.year)['pr'].sum().mean()
 
     if not obs_dec.empty:
         dec_heat = (obs_dec['temperature_2m_max'] > heat_threshold).sum()
@@ -698,9 +702,9 @@ def run_for_point(lat: float, lon: float):
             's_min_t': score(obs_dec['temperature_2m_min'].min(), -30, 5, True),
             's_days_0': score(dec_cold / 10, 1, 90),
             's_anom': score(obs_dec['temperature_2m'].mean() - era5_temp_base, 0, 4),
-            'pr_change_pct': ((obs_dec['pr'].sum()/10 - era5_pr_base) / era5_pr_base) * 100,
-            's_pr_change': score(abs(((obs_dec['pr'].sum()/10 - era5_pr_base) / era5_pr_base) * 100), 10, 50),
-            's_max_pr': score(obs_dec['pr'].max(), 30, 200)
+            'pr_change_pct': ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100,
+            's_pr_change': score(abs((obs_ann_pr - era5_pr_base) / era5_pr_base * 100), 10, 50),
+            's_max_pr': score(obs_dec['pr'].max(), 30, 500)
         }
     else:
         m = {
@@ -787,6 +791,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
