@@ -746,7 +746,7 @@ def run_for_point(lat: float, lon: float):
                     's_anom': score(t_mean - era5_temp_base, 0, 5),
                     'pr_change_pct': pr_change_pct,
                     's_pr_change': score(abs(pr_change_pct), 10, 50),
-                    's_max_pr': score(max_pr_proj, 30, 200)
+                    's_max_pr': score(max_pr_proj, 30, 500)
                 }
             else:
                 df = datasets[scenario]
@@ -767,7 +767,7 @@ def run_for_point(lat: float, lon: float):
                      's_days_0': score(dec_cold / 10, 1, 90),
                      'anom': t_anom, 's_anom': score(t_anom, 0, 5),
                      'pr_change_pct': pr_change, 's_pr_change': score(abs(pr_change), 10, 50),
-                     's_max_pr': score(np.max(pr), 30, 200)}
+                     's_max_pr': score(np.max(pr), 30, 500)}
             add_row(f'{scenario}_{ep}', m, year_proj=mid)
     scenarios_time = time.time() - scenarios_start
 
@@ -791,6 +791,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
