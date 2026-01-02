@@ -6,17 +6,10 @@ import concurrent.futures
 import logging
 from scipy import stats
 from pandas.tseries.offsets import DateOffset
-import os
-import json
-import tempfile
 
 # --- 0. SETUP ---
 logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
-
-# =================================================
-# EARTH ENGINE INITIALIZATION (SERVICE ACCOUNT)
-# =================================================
 
 EE_INITIALIZED = False
 
@@ -56,28 +49,55 @@ def ensure_ee_initialized():
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
 EPOCH_MIDPOINTS = {'2030s': 2030, '2050s': 2050, '2080s': 2080}
 
-ERA5_RANGE = ('1980-01-01', '2024-12-31')
-CMIP6_HIST_RANGE = ('1980-01-01', '2014-12-31')
+ERA5_RANGE = ('1960-01-01', '2024-12-31')
+CMIP6_HIST_RANGE = ('1960-01-01', '2014-12-31')
 CMIP6_FUT_RANGE = ('2025-01-01', '2085-12-31')
 MODEL = 'MPI-ESM1-2-HR'
-CHUNK_SIZE_YEARS = 10
+CHUNK_SIZE_YEARS = 12
 MAX_WORKERS = 4
+
+def is_coastal(geom, max_dist_km=50):
+    """
+    Coastal if:
+    - elevation ≤ 30 m
+    - within max_dist_km of ocean
+    """
+    try:
+        elev = ee.Image("NASA/NASADEM_HGT/001") \
+            .select("elevation") \
+            .reduceRegion(
+                ee.Reducer.mean(),
+                geom,
+                scale=90,
+                bestEffort=True
+            ).get("elevation").getInfo()
+    except:
+        return False
+
+    if elev is None or elev > 30:
+        return False
+
+    # Distance to ocean (landmask inversion)
+    ocean = ee.Image("JRC/GSW1_4/GlobalSurfaceWater") \
+        .select("occurrence") \
+        .lt(1)  # land = 1, ocean = 0
+
+    dist = ocean.fastDistanceTransform(1000).sqrt() \
+        .multiply(30) \
+        .reduceRegion(
+            ee.Reducer.min(),
+            geom,
+            scale=1000,
+            bestEffort=True
+        ).values().get(0).getInfo()
+
+    return dist is not None and dist <= max_dist_km * 1000
+
+
 
 # -------------------------------------------------------------------------
 # 1. SPATIAL CLIMATE ENGINE
 # -------------------------------------------------------------------------
-def safe_to_float(val, default=0.3):
-    """Safely convert values to float with fallback"""
-    if val is None:
-        return default
-    try:
-        v = float(val)
-        if np.isnan(v) or np.isinf(v):
-            return default
-        return v
-    except Exception:
-        return default
-        
 def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=None):
     try:
         coll = ee.ImageCollection(collection_id).filterDate(start, end)
@@ -169,20 +189,17 @@ def get_ipcc_slr_multiplier(year, scenario, geom):
     except Exception:
         local_elev = None
 
-    if local_elev is not None and local_elev > 20:
-        return 0.1
+    if local_elev is not None and local_elev > 30:
+        return 0.0
+
     slr_factors = {
         'ssp245': {2030: 1.05, 2050: 1.15, 2080: 1.35},
         'ssp585': {2030: 1.08, 2050: 1.25, 2080: 1.65}
     }
 
     epoch = min(slr_factors[scenario].keys(), key=lambda x: abs(x - year))
-    factor = slr_factors[scenario][epoch]
+    return slr_factors[scenario][epoch]
 
-    lon, lat = geom.coordinates().getInfo()
-    coastal_mult = 1.2 if abs(lat - 42.35) < 0.5 and abs(lon + 71.0) < 0.5 else 1.0
-
-    return factor * coastal_mult
 
 # -------------------------------------------------------------------------
 # 3. 🚀 ULTRA-PARALLEL WRI SAMPLING
@@ -284,7 +301,7 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
     earth_radius = 6371000
     lat_rad = np.radians(lat)
     all_points = {}
-    radii_m = [ 100000, 200000]
+    radii_m = [10000, 50000, 100000, 200000]
 
     for radius in radii_m:
         delta_lat = (radius / earth_radius) * (180 / np.pi)
@@ -457,27 +474,34 @@ def run_for_point(lat: float, lon: float):
     wri_time = time.time() - wri_start
 
     rfr_base = wri_base.get('Riverine Flood Risk', 1.0)
-    cfr_base = wri_base.get('Coastal Flood Risk', 1.0)
+
+    cfr_base = wri_base.get('Coastal Flood Risk')
+    if pd.isna(cfr_base):
+        cfr_base = np.nan
     
     geom_fc = geom.buffer(100_000)
     fire_cyclone_base = get_fire_cyclone_baselines(geom_fc)
 
-    # ndvi = float(fire_cyclone_base.get('NDVI', 0.3)) if fire_cyclone_base.get('NDVI') is not None else 0.3
-    ndvi = safe_to_float(fire_cyclone_base.get('NDVI'), 0.3)
-    wf_count = float(fire_cyclone_base.get('wf_count', 0))
-    storm_count = max(float(fire_cyclone_base.get('storm_count', 0.5)), 0.5)
-    max_wind_knots = float(fire_cyclone_base.get('max_wind_knots', 20))
+    ndvi = safe_to_float(fire_cyclone_base.get('NDVI'), default=0.3)
+    wf_count = safe_to_float(fire_cyclone_base.get('wf_count'), default=0.0)
+    storm_count = safe_to_float(fire_cyclone_base.get('storm_count'), default=0.5)
+    max_wind_knots = safe_to_float(fire_cyclone_base.get('max_wind_knots'), default=20.0)
+
+    storm_count = max(storm_count, 0.5)
 
     fuel_mult = np.clip(ndvi / 0.3, 0.5, 1.5)
     wf_base = np.clip((wf_count / 100) * 5, 0.5, 5.0) * fuel_mult
 
-    cy_wind_kmh = max_wind_knots * 1.852
-    rp_years = 34 / max(storm_count, 0.5)
-    damage_potential = (cy_wind_kmh / 150.0) ** 3
-    cy_base = (
-        np.clip(damage_potential * 5.0, 0.5, 5.0) * 0.8 +
-        np.clip(15.0 / rp_years, 0.5, 5.0) * 0.2
-    )
+    if storm_count < 1:
+        cy_base = np.nan
+    else:
+        cy_wind_kmh = max_wind_knots * 1.852
+        rp_years = 34 / storm_count
+        damage_potential = (cy_wind_kmh / 150.0) ** 3
+        cy_base = (
+            np.clip(damage_potential * 5.0, 0.5, 5.0) * 0.8 +
+            np.clip(15.0 / rp_years, 0.5, 5.0) * 0.2
+        )
 
     # ERA5 processing
     era5 = datasets['era5']; era5['year'] = era5['date'].dt.year
@@ -499,6 +523,8 @@ def run_for_point(lat: float, lon: float):
         slope, icept, _, _, _ = stats.linregress(ann['year'], ann[col])
         trends[m_name] = {'slope': slope, 'intercept': icept}
 
+    coastal_flag = is_coastal(geom)
+
     def add_row(col_name, metrics, year_proj=None):
         is_obs = 'Observed' in col_name
         pr_pct, t_anom = metrics.get('pr_change_pct', 0.0), metrics.get('anom', 0.0)
@@ -513,10 +539,12 @@ def run_for_point(lat: float, lon: float):
         wri_scenario = all_wri.get(scenario_key, wri_base)
 
         for h in WRI_WATER_HAZARDS:
+
+            # --- Drought Risk ---
             if h == 'Drought Risk':
                 if pd.isna(drr_base_score):
-                    continue
-                if is_obs:
+                    s = np.nan
+                elif is_obs:
                     s = drr_base_score
                 else:
                     drought_mult = max(
@@ -524,38 +552,45 @@ def run_for_point(lat: float, lon: float):
                         (1 - pr_pct / 100) + (t_anom / 4.0)
                     )
                     s = min(5.0, drr_base_score * drought_mult)
-                final_rows.append({
-                    'Hazard': 'Drought Risk',
-                    'Column': col_name,
-                    'Score': round(s, 3)
-                })
-                continue
 
-            base_s = wri_base.get(h)
-            if pd.isna(base_s):
-                continue
-
-            if is_obs:
-                s = base_s
+            # --- Other WRI hazards ---
             else:
-                fut_s = wri_scenario.get(h, base_s)
-                if pd.isna(fut_s):
-                    fut_s = base_s
-                s = fut_s
+                base_s = wri_base.get(h)
+                if is_obs:
+                    s = base_s if not pd.isna(base_s) else np.nan
+                else:
+                    fut_s = wri_scenario.get(h, base_s)
+                    s = fut_s if not pd.isna(fut_s) else base_s
 
             final_rows.append({
                 'Hazard': h,
                 'Column': col_name,
-                'Score': round(s, 3)
+                'Score': s
             })
 
+
+        # --- Riverine Flood Risk (always applicable) ---
         if is_obs:
             riverine_s = rfr_base
-            coastal_s = cfr_base
         else:
             riverine_s = min(5.0, rfr_base * max(0.8, 1 + (pr_pct / 100)))
-            scenario = 'ssp585' if '585' in col_name else 'ssp245'
-            coastal_s = min(5.0, cfr_base * get_ipcc_slr_multiplier(year_proj, scenario, geom))
+
+        # --- Coastal Flood Risk (ONLY if coastal) ---
+        
+
+        if not coastal_flag:
+            coastal_s = np.nan
+        else:
+            if is_obs:
+                coastal_s = cfr_base
+            else:
+                scenario = 'ssp585' if '585' in col_name else 'ssp245'
+                slr_mult = get_ipcc_slr_multiplier(year_proj, scenario, geom)
+
+                if pd.isna(cfr_base) or slr_mult is None:
+                    coastal_s = np.nan
+                else:
+                    coastal_s = min(5.0, cfr_base * slr_mult)
 
         final_rows.append({'Hazard': 'Riverine Flood Risk', 'Column': col_name, 'Score': round(riverine_s, 3)})
         final_rows.append({'Hazard': 'Coastal Flood Risk', 'Column': col_name, 'Score': round(coastal_s, 3)})
@@ -568,7 +603,8 @@ def run_for_point(lat: float, lon: float):
             cy_sens = 0.08
 
             s_wf = wf_base * (1 + t_anom * wf_sens)
-            s_cy = cy_base * (1 + t_anom * cy_sens)
+            s_cy = np.nan if pd.isna(cy_base) else cy_base * (1 + t_anom * cy_sens)
+
 
         s_wf = round(min(5.0, s_wf), 3)
         s_cy = round(min(5.0, s_cy), 3)
@@ -592,7 +628,7 @@ def run_for_point(lat: float, lon: float):
             's_anom': score(obs_dec['temperature_2m'].mean() - era5_temp_base, 0, 4),
             'pr_change_pct': ((obs_dec['pr'].sum()/10 - era5_pr_base) / era5_pr_base) * 100,
             's_pr_change': score(abs(((obs_dec['pr'].sum()/10 - era5_pr_base) / era5_pr_base) * 100), 10, 50),
-            's_max_pr': score(obs_dec['pr'].max(), 50, 200)
+            's_max_pr': score(obs_dec['pr'].max(), 30, 200)
         }
     else:
         m = {
@@ -620,6 +656,7 @@ def run_for_point(lat: float, lon: float):
                 pr_sum_proj = trends['pr_sum']['slope'] * mid + trends['pr_sum']['intercept']
                 max_pr_proj = trends['max_pr']['slope'] * mid + trends['max_pr']['intercept']
                 pr_change_pct = ((pr_sum_proj - era5_pr_base) / era5_pr_base) * 100
+                pr_change_pct = np.clip(pr_change_pct, -30, 30)
 
                 dec_heat = max(dec_heat * 10, 0)
                 dec_cold = max(dec_cold * 10, 0)
@@ -633,7 +670,7 @@ def run_for_point(lat: float, lon: float):
                     's_anom': score(t_mean - era5_temp_base, 0, 5),
                     'pr_change_pct': pr_change_pct,
                     's_pr_change': score(abs(pr_change_pct), 10, 50),
-                    's_max_pr': score(max_pr_proj, 50, 200)
+                    's_max_pr': score(max_pr_proj, 30, 200)
                 }
             else:
                 df = datasets[scenario]
@@ -672,5 +709,3 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
-
-
