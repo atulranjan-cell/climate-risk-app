@@ -7,8 +7,9 @@ import logging
 import numpy as np
 import time
 from contextlib import asynccontextmanager
-from hazards import run_for_point
-from hazards import HazardError
+
+# Import after logging setup to avoid issues
+from hazards import run_for_point, HazardError
 
 # Logging setup
 logging.basicConfig(
@@ -23,7 +24,6 @@ async def lifespan(app: FastAPI):
     yield
     logger.info(":earth_africa: Climate Hazard API shutting down...")
 
-# :white_check_mark: SIMPLIFIED: No Field() validation in models
 class HazardResponse(BaseModel):
     success: bool
     city: Optional[str] = None
@@ -79,31 +79,27 @@ async def root():
 async def health():
     return HealthResponse()
 
-# :white_check_mark: FIXED: Manual validation + NO Field() in query params
 @app.get("/run", response_model=HazardResponse)
 async def run_hazards(lat: float, lon: float, city: Optional[str] = None):
     """
     Compute climate hazard matrix for lat/lon
     """
-    # :white_check_mark: MANUAL VALIDATION (FastAPI native way)
     if not (-90 <= lat <= 90):
         raise HTTPException(status_code=400, detail="Latitude must be between -90 and 90")
     if not (-180 <= lon <= 180):
         raise HTTPException(status_code=400, detail="Longitude must be between -180 and 180")
     
+    start_time = time.time()
+    logger.info(f":rocket: Computing hazards for {lat:.4f}, {lon:.4f} ({city or 'unknown'})")
+    
     try:
-        start_time = time.time()
-        logger.info(f":rocket: Computing hazards for {lat:.4f}, {lon:.4f} ({city or 'unknown'})")
-        
         df = run_for_point(lat, lon)
         df = df.replace([float("inf"), float("-inf"), np.nan], None)
         
-        computation_time = (time.time() - start_time) * 1000
-        
-        logger.info(f":white_check_mark: Hazards computed in {computation_time:.1f}ms | Shape: {df.shape}")
-        
         cols = ["Hazard"] + [c for c in df.columns if c != "Hazard"]
+        computation_time_ms = (time.time() - start_time) * 1000
         
+        logger.info(f":white_check_mark: Hazards computed in {computation_time_ms:.1f}ms | Shape: {df.shape}")
         
         return {
             "success": True,
@@ -114,11 +110,9 @@ async def run_hazards(lat: float, lon: float, city: Optional[str] = None):
             "data": df[cols].to_dict(orient="records"),
             "shape": df.shape,
             "hazards_count": df.shape[0],
-            "computation_time_ms": round((time.time() - start_time) * 1000, 1)
+            "computation_time_ms": round(computation_time_ms, 1)
         }
-
-    from hazards import HazardError
-
+    
     except HazardError as he:
         logger.error(f"HazardError [{he.stage}]: {he.message}")
         raise HTTPException(
@@ -140,10 +134,6 @@ async def run_hazards(lat: float, lon: float, city: Optional[str] = None):
             }
         )
 
-    except Exception as e:
-        logger.exception(f":x: Hazard computation failed for {lat}, {lon}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc: Exception):
     return {"error": "Endpoint not found. Try /docs, /ui, /health, or /run?lat=25.59&lon=85.14"}
@@ -151,4 +141,3 @@ async def not_found_handler(request: Request, exc: Exception):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
-
