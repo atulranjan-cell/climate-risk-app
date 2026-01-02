@@ -8,6 +8,7 @@ import numpy as np
 import time
 from contextlib import asynccontextmanager
 from hazards import run_for_point
+from hazards import HazardError
 
 # Logging setup
 logging.basicConfig(
@@ -115,6 +116,30 @@ async def run_hazards(lat: float, lon: float, city: Optional[str] = None):
             "hazards_count": df.shape[0],
             "computation_time_ms": round((time.time() - start_time) * 1000, 1)
         }
+
+    from hazards import HazardError
+
+    except HazardError as he:
+        logger.error(f"HazardError [{he.stage}]: {he.message}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_type": "HAZARD_ERROR",
+                "stage": he.stage,
+                "message": he.message
+            }
+        )
+    
+    except Exception as e:
+        logger.exception("Unhandled backend error")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_type": "UNKNOWN",
+                "message": "Unexpected server error"
+            }
+        )
+
     except Exception as e:
         logger.exception(f":x: Hazard computation failed for {lat}, {lon}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -126,3 +151,4 @@ async def not_found_handler(request: Request, exc: Exception):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+
