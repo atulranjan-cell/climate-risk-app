@@ -61,7 +61,17 @@ def ensure_ee_initialized():
             stage="EE_INIT",
             message=str(e)
         )
-
+def safe_to_float(val, default=0.3):
+    """Safely convert values to float with fallback"""
+    if val is None:
+        return default
+    try:
+        v = float(val)
+        if np.isnan(v) or np.isinf(v):
+            return default
+        return v
+    except Exception:
+        return default
 # --- CONFIGURATION ---
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
 EPOCH_MIDPOINTS = {'2030s': 2030, '2050s': 2050, '2080s': 2080}
@@ -754,6 +764,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
