@@ -533,10 +533,10 @@ def run_for_point(lat: float, lon: float):
 
     ndvi = safe_to_float(fire_cyclone_base.get('NDVI'), default=0.3)
     wf_count = safe_to_float(fire_cyclone_base.get('wf_count'), default=0.0)
-    storm_count = safe_to_float(fire_cyclone_base.get('storm_count'), default=0.5)
+    storm_count = safe_to_float(fire_cyclone_base.get('storm_count'), default=0.0001)
     max_wind_knots = safe_to_float(fire_cyclone_base.get('max_wind_knots'), default=20.0)
 
-    storm_count = max(storm_count, 0.5)
+    storm_count = max(storm_count, 0.0001)
 
     fuel_mult = np.clip(ndvi / 0.3, 0.5, 1.5)
     wf_base = np.clip((wf_count / 100) * 5, 0.5, 5.0) * fuel_mult
@@ -764,6 +764,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
