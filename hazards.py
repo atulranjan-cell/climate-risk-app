@@ -6,6 +6,9 @@ import concurrent.futures
 import logging
 from scipy import stats
 from pandas.tseries.offsets import DateOffset
+import os
+import json
+import tempfile
 
 # --- 0. SETUP ---
 logging.getLogger('urllib3').setLevel(logging.ERROR)
@@ -709,3 +712,4 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
