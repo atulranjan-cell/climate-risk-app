@@ -233,15 +233,15 @@ def get_ipcc_slr_multiplier(year, scenario, geom):
 # -------------------------------------------------------------------------
 def safe_float(props, key):
     v = props.get(key)
-    if v is None or str(v).lower() in ['none', 'null', 'nan'] or pd.isna(v):
+    if v is None or str(v).lower() in ['none', 'null', 'nan']:
         return np.nan
     try:
         v = float(v)
-        if abs(v) > 5:
-            return np.nan
-        return v
     except:
         return np.nan
+
+    # Clip to the valid Aqueduct score range [0,5]
+    return float(np.clip(v, 0.0, 5.0))
 
 WRI_SYSTEM_KEYS = ['Water Stress', 'Seasonal Variability', 'Interannual Variability']
 WRI_EVENT_KEYS  = ['Drought Risk', 'Riverine Flood Risk', 'Coastal Flood Risk']
@@ -525,8 +525,10 @@ def run_for_point(lat: float, lon: float):
     cfr_base = wri_base.get('Coastal Flood Risk')
     if pd.isna(cfr_base):
         cfr_base = np.nan
+        
+    buffer_m = 50_000 if coastal_flag else 30_000
+    geom_fc = geom.buffer(buffer_m)
     
-    geom_fc = geom.buffer(100_000)
     fire_cyclone_base = get_fire_cyclone_baselines(geom_fc)
     
     if fire_cyclone_base is None:
@@ -690,22 +692,42 @@ def run_for_point(lat: float, lon: float):
     # Execute Observed 2024
     obs_start = time.time()
     obs_dec = era5[(era5['year'] >= 2015) & (era5['year'] <= 2024)]
-    obs_ann_pr = obs_dec.groupby(obs_dec['date'].dt.year)['pr'].sum().mean()
-
+    
     if not obs_dec.empty:
+        # Mean annual observed precipitation (mm/year)
+        obs_ann_pr = obs_dec.groupby(obs_dec['date'].dt.year)['pr'].sum().mean()
+    
+        # Heat / cold day counts over the decade
         dec_heat = (obs_dec['temperature_2m_max'] > heat_threshold).sum()
         dec_cold = (obs_dec['temperature_2m_min'] < cold_threshold).sum()
-
+    
+        # Temperature anomaly (raw, °C)
+        t_anom_obs = obs_dec['temperature_2m'].mean() - era5_temp_base
+    
         m = {
+            # --- Temperature extremes ---
             's_max_t': score(obs_dec['temperature_2m_max'].max(), 30, 50),
+    
+            # Approx annualized intensity from decade counts
             's_days_35': score(dec_heat / 10, 5, 150),
-            's_min_t': score(obs_dec['temperature_2m_min'].min(), -30, 5, True),
+            's_min_t': score(obs_dec['temperature_2m_min'].min(), -30, 5, inverted=True),
             's_days_0': score(dec_cold / 10, 1, 90),
-            's_anom': score(obs_dec['temperature_2m'].mean() - era5_temp_base, 0, 4),
+    
+            # --- Temperature anomaly ---
+            'anom': t_anom_obs,
+            's_anom': score(t_anom_obs, 0, 4),
+    
+            # --- Precipitation change (annual mean vs baseline) ---
             'pr_change_pct': ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100,
-            's_pr_change': score(abs((obs_ann_pr - era5_pr_base) / era5_pr_base * 100), 10, 50),
+            's_pr_change': score(
+                abs((obs_ann_pr - era5_pr_base) / era5_pr_base * 100),
+                10, 50
+            ),
+    
+            # --- Extreme precipitation (daily max, monsoon-safe ceiling) ---
             's_max_pr': score(obs_dec['pr'].max(), 30, 500)
         }
+
     else:
         m = {
             's_max_t': 1.0, 's_days_35': 1.0, 's_min_t': 1.0, 's_days_0': 1.0,
@@ -791,6 +813,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
