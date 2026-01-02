@@ -737,10 +737,10 @@ def run_for_point(lat: float, lon: float):
     # Final matrix
     matrix_start = time.time()
     if not final_rows:
-    raise HazardError(
-        stage="FINAL_MATRIX",
-        message="No hazard rows generated"
-    )
+        raise HazardError(
+            stage="FINAL_MATRIX",
+            message="No hazard rows generated"
+        )
 
     df_final = pd.DataFrame(final_rows).pivot(index='Hazard', columns='Column', values='Score')
     cols = ['Observed_2024'] + [f'{s}_{e}' for s in ['Trend', 'ssp245', 'ssp585'] for e in EPOCHS]
@@ -754,5 +754,6 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
