@@ -9,44 +9,58 @@ from pandas.tseries.offsets import DateOffset
 import os
 import json
 import tempfile
+import threading
 
 # --- 0. SETUP ---
 logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 
 EE_INITIALIZED = False
+_EE_LOCK = threading.Lock()
 
 def ensure_ee_initialized():
     global EE_INITIALIZED
     if EE_INITIALIZED:
         return
 
-    if "GCP_SERVICE_ACCOUNT" not in os.environ:
-        raise RuntimeError("Missing GCP_SERVICE_ACCOUNT environment variable")
+    with _EE_LOCK:
+        if EE_INITIALIZED:
+            return
 
-    service_account_info = json.loads(
-        os.environ["GCP_SERVICE_ACCOUNT"]
-    )
+        if "GCP_SERVICE_ACCOUNT" not in os.environ:
+            raise RuntimeError("Missing GCP_SERVICE_ACCOUNT environment variable")
 
-    # Write service account JSON to temp file
-    with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
-        json.dump(service_account_info, f)
-        key_path = f.name
+        service_account_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
 
-    credentials = ee.ServiceAccountCredentials(
-        service_account_info["client_email"],
-        key_path
-    )
+        with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
+            json.dump(service_account_info, f)
+            key_path = f.name
 
-    ee.Initialize(
-        credentials,
-        project=service_account_info["project_id"],
-        url="https://earthengine-highvolume.googleapis.com"
-    )
+        credentials = ee.ServiceAccountCredentials(
+            service_account_info["client_email"],
+            key_path
+        )
 
-    logging.info("🌍 Earth Engine initialized (service account)")
-    EE_INITIALIZED = True
+        ee.Initialize(
+            credentials,
+            project=service_account_info["project_id"],
+            url="https://earthengine-highvolume.googleapis.com"
+        )
 
+        logging.info("🌍 Earth Engine initialized (service account)")
+        EE_INITIALIZED = True
+
+def safe_to_float(val, default=0.3):
+    """Safely convert EE .getInfo() result to float"""
+    if val is None or str(val).lower() in ['none', 'null', 'nan']:
+        return default
+    try:
+        v = float(val)
+        if abs(v) > 1000:  # Sanity check
+            return default
+        return v
+    except:
+        return default
 
 # --- CONFIGURATION ---
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
@@ -66,7 +80,7 @@ def is_coastal(geom, max_dist_km=50):
     - within max_dist_km of ocean
     """
     try:
-        elev = ee.Image("NASA/NASADEM_HGT/001") \
+        elev_raw = ee.Image("NASA/NASADEM_HGT/001") \
             .select("elevation") \
             .reduceRegion(
                 ee.Reducer.mean(),
@@ -74,31 +88,33 @@ def is_coastal(geom, max_dist_km=50):
                 scale=90,
                 bestEffort=True
             ).get("elevation").getInfo()
+        elev = safe_to_float(elev_raw, default=np.nan)
     except:
         return False
 
-    if elev is None or elev > 30:
+    if np.isnan(elev) or elev > 30:
         return False
 
-    # Distance to ocean (landmask inversion)
-    ocean = ee.Image("JRC/GSW1_4/GlobalSurfaceWater") \
-        .select("occurrence") \
-        .lt(1)  # land = 1, ocean = 0
+    try:
+        ocean = ee.Image("JRC/GSW1_4/GlobalSurfaceWater") \
+            .select("occurrence") \
+            .lt(1)  # land = 1, ocean = 0
 
-    dist = ocean.fastDistanceTransform(1000).sqrt() \
-        .multiply(30) \
-        .reduceRegion(
-            ee.Reducer.min(),
-            geom,
-            scale=1000,
-            bestEffort=True
-        ).values().get(0).getInfo()
+        dist_raw = ocean.fastDistanceTransform(1000).sqrt() \
+            .multiply(30) \
+            .reduceRegion(
+                ee.Reducer.min(),
+                geom,
+                scale=1000,
+                bestEffort=True
+            ).values().get(0).getInfo()
 
-    return dist is not None and dist <= max_dist_km * 1000
+        dist = safe_to_float(dist_raw, default=np.inf)
+        return dist <= max_dist_km * 1000
+    except:
+        return False
 
-
-
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------------------- 
 # 1. SPATIAL CLIMATE ENGINE
 # -------------------------------------------------------------------------
 def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=None):
@@ -127,7 +143,8 @@ def fetch_chunk(collection_id, geom, start, end, bands, model=None, scenario=Non
             rows.append(row)
 
         df = pd.DataFrame(rows)
-        df['date'] = pd.to_datetime(df['time'], unit='ms')
+        df['date'] = pd.to_datetime(df['time'], unit='ms', errors='coerce')
+        df = df.dropna(subset=['date'])
 
         for b in ['temperature_2m', 'temperature_2m_max', 'temperature_2m_min', 'tas', 'tasmax', 'tasmin']:
             if b in df.columns:
@@ -177,22 +194,23 @@ def perform_qm(train_df, hist_df, fut_df, t_col, h_col, f_col):
         corrected[f_idx] = np.quantile(o_m, np.clip(ranks, 0, 0.9999))
     return corrected
 
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------------------- 
 # 2. 🌊 IPCC SEA LEVEL RISE MULTIPLIER
 # -------------------------------------------------------------------------
 def get_ipcc_slr_multiplier(year, scenario, geom):
     try:
         elevation_img = ee.Image("NASA/NASADEM_HGT/001").select('elevation')
-        local_elev = elevation_img.reduceRegion(
+        local_elev_raw = elevation_img.reduceRegion(
             reducer=ee.Reducer.mean(),
             geometry=geom,
             scale=30,
             bestEffort=True
         ).get('elevation').getInfo()
+        local_elev = safe_to_float(local_elev_raw, default=np.nan)
     except Exception:
-        local_elev = None
+        local_elev = np.nan
 
-    if local_elev is not None and local_elev > 30:
+    if not np.isnan(local_elev) and local_elev > 30:
         return 0.0
 
     slr_factors = {
@@ -200,25 +218,12 @@ def get_ipcc_slr_multiplier(year, scenario, geom):
         'ssp585': {2030: 1.08, 2050: 1.25, 2080: 1.65}
     }
 
-    epoch = min(slr_factors[scenario].keys(), key=lambda x: abs(x - year))
-    return slr_factors[scenario][epoch]
+    epoch = min(slr_factors.get(scenario, {}), key=lambda x: abs(x - year), default=2030)
+    return slr_factors.get(scenario, {}).get(epoch, 1.0)
 
-
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------------------- 
 # 3. 🚀 ULTRA-PARALLEL WRI SAMPLING
 # -------------------------------------------------------------------------
-def safe_float(props, key):
-    v = props.get(key)
-    if v is None or str(v).lower() in ['none', 'null', 'nan'] or pd.isna(v):
-        return np.nan
-    try:
-        v = float(v)
-        if abs(v) > 5:
-            return np.nan
-        return v
-    except:
-        return np.nan
-
 WRI_SYSTEM_KEYS = ['Water Stress', 'Seasonal Variability', 'Interannual Variability']
 WRI_EVENT_KEYS  = ['Drought Risk', 'Riverine Flood Risk', 'Coastal Flood Risk']
 
@@ -237,20 +242,20 @@ def sample_nearest_wri(coll, point, use_baseline_bau30, year=None, scenario_name
 
         if use_baseline_bau30:
             return {
-                'Water Stress': safe_float(props, 'bws_score'),
-                'Drought Risk': safe_float(props, 'drr_score'),
-                'Seasonal Variability': safe_float(props, 'sev_score'),
-                'Interannual Variability': safe_float(props, 'iav_score'),
-                'Riverine Flood Risk': safe_float(props, 'rfr_score'),
-                'Coastal Flood Risk': safe_float(props, 'cfr_score')
+                'Water Stress': safe_to_float(props, 'bws_score'),
+                'Drought Risk': safe_to_float(props, 'drr_score'),
+                'Seasonal Variability': safe_to_float(props, 'sev_score'),
+                'Interannual Variability': safe_to_float(props, 'iav_score'),
+                'Riverine Flood Risk': safe_to_float(props, 'rfr_score'),
+                'Coastal Flood Risk': safe_to_float(props, 'cfr_score')
             }
         else:
             pref = 'pes' if '585' in (scenario_name or '') else 'opt' if '245' in (scenario_name or '') else 'bau'
             y_key = '30' if year == 2030 else '50' if year == 2050 else '80'
             return {
-                'Water Stress': safe_float(props, f'{pref}{y_key}_ws_x_s'),
-                'Seasonal Variability': safe_float(props, f'{pref}{y_key}_sv_x_s'),
-                'Interannual Variability': safe_float(props, f'{pref}{y_key}_iv_x_s'),
+                'Water Stress': safe_to_float(props, f'{pref}{y_key}_ws_x_s'),
+                'Seasonal Variability': safe_to_float(props, f'{pref}{y_key}_sv_x_s'),
+                'Interannual Variability': safe_to_float(props, f'{pref}{y_key}_iv_x_s'),
                 'Drought Risk': 0.0
             }
     except:
@@ -265,10 +270,9 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
     else:
         coll = ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/future_annual")
 
-    center_start = time.time()
     center_pt = ee.Geometry.Point([lon, lat])
     center_result = sample_nearest_wri(coll, center_pt, use_baseline_bau30, year, scenario_name)
-    center_time = time.time() - center_start
+    center_time = time.time() - start_time
 
     system_locked = False
     if use_baseline_bau30 and center_result and system_metrics_invalid(center_result):
@@ -300,7 +304,6 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
             'total_time': total_time
         }
 
-    parallel_start = time.time()
     earth_radius = 6371000
     lat_rad = np.radians(lat)
     all_points = {}
@@ -325,8 +328,6 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
             result = future.result()
             if result:
                 all_results[name] = result
-
-    parallel_time = time.time() - parallel_start
 
     if not all_results:
         total_time = time.time() - start_time
@@ -354,7 +355,6 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
         return nearest, {
             'method': f'PARALLEL_{radius_used}km',
             'center_time': center_time,
-            'parallel_time': parallel_time,
             'total_time': total_time
         }
 
@@ -394,53 +394,59 @@ def get_all_wri_parallel(geom):
     return all_wri_results, timings
 
 def get_fire_cyclone_baselines(geom):
-    landsat = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2") \
-        .filterBounds(geom) \
-        .filterDate('2023-01-01', '2023-12-31') \
-        .median()
+    try:
+        landsat = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2") \
+            .filterBounds(geom) \
+            .filterDate('2023-01-01', '2023-12-31') \
+            .median()
 
-    ndvi = landsat.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
-    ndvi_val = ndvi.reduceRegion(
-        ee.Reducer.mean(), geom, 1000, bestEffort=True
-    ).get('NDVI')
+        ndvi = landsat.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
+        ndvi_val = ndvi.reduceRegion(
+            ee.Reducer.mean(), geom, 1000, bestEffort=True
+        ).get('NDVI')
 
-    firms = ee.ImageCollection("FIRMS") \
-        .filterBounds(geom) \
-        .filterDate('2023-01-01', '2023-12-31') \
-        .filter(ee.Filter.gt('confidence', 75)) \
-        .filter(ee.Filter.eq('type', 0)) \
-        .filter(ee.Filter.gt('frp', 15))
+        firms = ee.ImageCollection("FIRMS") \
+            .filterBounds(geom) \
+            .filterDate('2023-01-01', '2023-12-31') \
+            .filter(ee.Filter.gt('confidence', 75)) \
+            .filter(ee.Filter.eq('type', 0)) \
+            .filter(ee.Filter.gt('frp', 15))
 
-    wf_count = firms.size()
+        wf_count = firms.size()
 
-    tracks = ee.FeatureCollection("NOAA/IBTrACS/v4") \
-        .filterBounds(geom) \
-        .filter(ee.Filter.gte('SEASON', 1990))
+        tracks = ee.FeatureCollection("NOAA/IBTrACS/v4") \
+            .filterBounds(geom) \
+            .filter(ee.Filter.gte('SEASON', 1990))
 
-    storm_count = tracks.distinct('SID').size()
+        def clean_wind(f):
+            wind_cols = [
+                'WMO_WIND', 'USA_WIND', 'TOKYO_WIND',
+                'CMA_WIND', 'HKO_WIND', 'NEWDELHI_WIND',
+                'REUNION_WIND', 'BOM_WIND', 'NADI_WIND', 'WELLINGTON_WIND'
+            ]
+            max_v = ee.Number(0)
+            for col in wind_cols:
+                val = ee.Number(ee.Algorithms.If(f.get(col), f.get(col), 0))
+                max_v = max_v.max(val)
+            return f.set('peak_wind', max_v)
+        
+        storm_count = tracks.distinct('SID').size()
+        max_wind = ee.Algorithms.If(
+            storm_count.gt(0),
+            tracks.map(clean_wind).aggregate_max('peak_wind'),
+            0
+        )
 
-    def clean_wind(f):
-        wind_cols = [
-            'WMO_WIND', 'USA_WIND', 'TOKYO_WIND',
-            'CMA_WIND', 'HKO_WIND', 'NEWDELHI_WIND',
-            'REUNION_WIND', 'BOM_WIND', 'NADI_WIND', 'WELLINGTON_WIND'
-        ]
-        max_v = ee.Number(0)
-        for col in wind_cols:
-            val = ee.Number(ee.Algorithms.If(f.get(col), f.get(col), 0))
-            max_v = max_v.max(val)
-        return f.set('peak_wind', max_v)
-    
-    max_wind = tracks.map(clean_wind).aggregate_max('peak_wind')
+        return ee.Dictionary({
+            'NDVI': ndvi_val,
+            'wf_count': wf_count,
+            'storm_count': storm_count,
+            'max_wind_knots': ee.Number(max_wind)
+        }).getInfo()
+    except:
+        return {'NDVI': 0.3, 'wf_count': 0, 'storm_count': 0.5, 'max_wind_knots': 20.0}
 
-    return ee.Dictionary({
-        'NDVI': ndvi_val,
-        'wf_count': wf_count,
-        'storm_count': storm_count,
-        'max_wind_knots': max_wind
-    }).getInfo()
-
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------------------- 
 # 4. MAIN API FUNCTION
 # -------------------------------------------------------------------------
 def run_for_point(lat: float, lon: float):
@@ -476,10 +482,12 @@ def run_for_point(lat: float, lon: float):
     baseline_method = wri_base.get('_method', 'UNKNOWN')
     wri_time = time.time() - wri_start
 
-    rfr_base = wri_base.get('Riverine Flood Risk', 1.0)
+    rfr_base = safe_to_float(wri_base.get('Riverine Flood Risk'), default=1.0)
 
-    cfr_base = wri_base.get('Coastal Flood Risk')
-    if pd.isna(cfr_base):
+    cfr_base = safe_to_float(wri_base.get('Coastal Flood Risk'), default=np.nan)
+    
+    coastal_flag = is_coastal(geom)
+    if not coastal_flag:
         cfr_base = np.nan
     
     geom_fc = geom.buffer(100_000)
@@ -526,8 +534,6 @@ def run_for_point(lat: float, lon: float):
         slope, icept, _, _, _ = stats.linregress(ann['year'], ann[col])
         trends[m_name] = {'slope': slope, 'intercept': icept}
 
-    coastal_flag = is_coastal(geom)
-
     def add_row(col_name, metrics, year_proj=None):
         is_obs = 'Observed' in col_name
         pr_pct, t_anom = metrics.get('pr_change_pct', 0.0), metrics.get('anom', 0.0)
@@ -542,7 +548,6 @@ def run_for_point(lat: float, lon: float):
         wri_scenario = all_wri.get(scenario_key, wri_base)
 
         for h in WRI_WATER_HAZARDS:
-
             # --- Drought Risk ---
             if h == 'Drought Risk':
                 if pd.isna(drr_base_score):
@@ -555,7 +560,6 @@ def run_for_point(lat: float, lon: float):
                         (1 - pr_pct / 100) + (t_anom / 4.0)
                     )
                     s = min(5.0, drr_base_score * drought_mult)
-
             # --- Other WRI hazards ---
             else:
                 base_s = wri_base.get(h)
@@ -571,7 +575,6 @@ def run_for_point(lat: float, lon: float):
                 'Score': s
             })
 
-
         # --- Riverine Flood Risk (always applicable) ---
         if is_obs:
             riverine_s = rfr_base
@@ -579,8 +582,6 @@ def run_for_point(lat: float, lon: float):
             riverine_s = min(5.0, rfr_base * max(0.8, 1 + (pr_pct / 100)))
 
         # --- Coastal Flood Risk (ONLY if coastal) ---
-        
-
         if not coastal_flag:
             coastal_s = np.nan
         else:
@@ -607,7 +608,6 @@ def run_for_point(lat: float, lon: float):
 
             s_wf = wf_base * (1 + t_anom * wf_sens)
             s_cy = np.nan if pd.isna(cy_base) else cy_base * (1 + t_anom * cy_sens)
-
 
         s_wf = round(min(5.0, s_wf), 3)
         s_cy = round(min(5.0, s_cy), 3)
@@ -664,7 +664,6 @@ def run_for_point(lat: float, lon: float):
                 dec_heat = max(dec_heat * 10, 0)
                 dec_cold = max(dec_cold * 10, 0)
                 m = {
-                    
                     's_max_t': score(trends['max_t']['slope'] * mid + trends['max_t']['intercept'], 30, 50),
                     's_min_t': score(min_t_proj, -30, 5, inverted=True),
                     's_days_35': score(dec_heat / 10, 5, 150),
@@ -710,6 +709,3 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
-
-                                     
-
