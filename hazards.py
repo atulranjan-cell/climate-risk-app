@@ -536,25 +536,32 @@ def run_for_point(lat: float, lon: float):
 
     ndvi = safe_to_float(fire_cyclone_base.get('NDVI'), default=0.3)
     wf_count = safe_to_float(fire_cyclone_base.get('wf_count'), default=0.0)
-    storm_count = safe_to_float(fire_cyclone_base.get('storm_count'), default=0.0001)
+    storm_count = fire_cyclone_base.get('storm_count')
+    try:
+        storm_count = float(storm_count)
+    except Exception:
+        storm_count = np.nan
     max_wind_knots = safe_to_float(fire_cyclone_base.get('max_wind_knots'), default=20.0)
-
-    storm_count = max(storm_count, 0.0001)
 
     fuel_mult = np.clip(ndvi / 0.3, 0.5, 1.5)
     wf_base = np.clip((wf_count / 100) * 5, 0.5, 5.0) * fuel_mult
 
-    if storm_count < 1:
+    if not coastal_flag:
         cy_base = np.nan
+    
+    elif storm_count is None or pd.isna(storm_count) or storm_count < 1:
+        cy_base = np.nan
+    
     else:
         cy_wind_kmh = max_wind_knots * 1.852
         rp_years = 34 / storm_count
+    
         damage_potential = (cy_wind_kmh / 150.0) ** 3
+    
         cy_base = (
             np.clip(damage_potential * 5.0, 0.5, 5.0) * 0.8 +
             np.clip(15.0 / rp_years, 0.5, 5.0) * 0.2
         )
-
     # ERA5 processing
     era5 = datasets['era5']; era5['year'] = era5['date'].dt.year
     era5_base = era5[(era5['date'] >= '1960-01-01') & (era5['date'] <= '2014-12-31')]
@@ -778,6 +785,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
