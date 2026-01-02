@@ -292,14 +292,23 @@ async function compute() {
     if (!res.ok) throw new Error(`Backend error (${res.status})`);
 
     const json = await res.json();
-    if (!json.success) throw new Error(json.error || 'Backend failed');
+    
+    if (!json.success) {
+      if (json.detail?.error_type === "HAZARD_ERROR") {
+        throw new Error(
+          `Stage: ${json.detail.stage} — ${json.detail.message}`
+        );
+      }
+      throw new Error(json.detail?.message || "Backend failed");
+    }
+
 
     renderTable(json.data, json.columns, city, lat, lon);
     showStatus('✅ Scan complete', 'success');
     document.getElementById('modal').style.display = 'block';
 
   } catch (e) {
-    showStatus(`❌ ${e.message}`, 'error');
+    showStatus(`❌ Error: ${e.message}`, 'error');
   } finally {
     isComputing = false;
     btn.disabled = false;
@@ -360,3 +369,4 @@ document.addEventListener('DOMContentLoaded', initMap);
 
 </body>
 </html>
+
