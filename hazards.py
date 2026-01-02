@@ -515,7 +515,10 @@ def run_for_point(lat: float, lon: float):
     baseline_method = wri_base.get('_method', 'UNKNOWN')
     wri_time = time.time() - wri_start
 
-    rfr_base = wri_base.get('Riverine Flood Risk', 1.0)
+    rfr_base = wri_base.get('Riverine Flood Risk')
+
+    if rfr_base is None or pd.isna(rfr_base):
+        rfr_base = np.nan
 
     cfr_base = wri_base.get('Coastal Flood Risk')
     if pd.isna(cfr_base):
@@ -556,7 +559,13 @@ def run_for_point(lat: float, lon: float):
     era5 = datasets['era5']; era5['year'] = era5['date'].dt.year
     era5_base = era5[(era5['date'] >= '1960-01-01') & (era5['date'] <= '2014-12-31')]
     era5_temp_base = era5_base['temperature_2m'].mean()
-    era5_pr_base = era5_base.groupby(era5_base['date'].dt.year)['pr'].sum().mean() or 1.0
+    
+    era5_pr_base = era5_base.groupby(
+        era5_base['date'].dt.year
+    )['pr'].sum().mean()
+    
+    if pd.isna(era5_pr_base) or era5_pr_base == 0:
+        era5_pr_base = 1e-6
 
     hist_tmax = era5_base['temperature_2m_max']
     hist_tmin = era5_base['temperature_2m_min']
@@ -619,10 +628,15 @@ def run_for_point(lat: float, lon: float):
 
 
         # --- Riverine Flood Risk (always applicable) ---
-        if is_obs:
+        if pd.isna(rfr_base):
+            riverine_s = np.nan
+        elif is_obs:
             riverine_s = rfr_base
         else:
-            riverine_s = min(5.0, rfr_base * max(0.8, 1 + (pr_pct / 100)))
+            riverine_s = min(
+                5.0,
+                rfr_base * max(0.8, 1 + (pr_pct / 100))
+        )
 
         # --- Coastal Flood Risk (ONLY if coastal) ---
         
@@ -764,6 +778,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
