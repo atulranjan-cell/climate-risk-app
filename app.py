@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any, Tuple
 import logging
 import numpy as np
 import time
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 # Import after logging setup to avoid issues
@@ -136,8 +137,16 @@ async def run_hazards(lat: float, lon: float, city: Optional[str] = None):
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc: Exception):
-    return {"error": "Endpoint not found. Try /docs, /ui, /health, or /run?lat=25.59&lon=85.14"}
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "Endpoint not found",
+            "hint": "Try /docs, /ui, /health, or /run?lat=25.59&lon=85.14"
+        }
+    )
+
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+
