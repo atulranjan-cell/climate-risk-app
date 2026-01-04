@@ -777,7 +777,7 @@ def run_for_point(lat: float, lon: float):
             'anom': t_anom_obs,
             's_anom': score(t_anom_obs, 0, 4),
             
-            pr_pct = ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100
+            pr_pct = ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100,
             
             'pr_change_pct': pr_pct,
             's_pr_change': (
@@ -906,4 +906,5 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
 
