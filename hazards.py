@@ -203,7 +203,7 @@ def get_annual_features(
 def score(val, min_v, max_v, inverted=False):
     if pd.isna(val): return np.nan
     n = 1 - (val - min_v) / (max_v - min_v) if inverted else (val - min_v) / (max_v - min_v)
-    return round(np.clip(n, 0, 1) * 5, 3)
+    return round(np.clip(n, 0.05, 0.95) * 5, 3)
 
 def perform_qm(train_df, hist_df, fut_df, t_col, h_col, f_col):
     """
@@ -438,7 +438,7 @@ def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=No
 
     if not all_results:
         total_time = time.time() - start_time
-        return {k: 1.0 for k in ['Water Stress', 'Drought Risk', 'Seasonal Variability',
+        return {k: None for k in ['Water Stress', 'Drought Risk', 'Seasonal Variability',
                                  'Interannual Variability', 'Riverine Flood Risk', 'Coastal Flood Risk']}, {'method': 'FAILED', 'total_time': total_time}
 
     valid_candidates = []
@@ -634,7 +634,6 @@ def run_for_point(lat: float, lon: float):
         else:
             cy_wind_kmh = max_wind_knots * 1.852
             rp_years = np.clip(34 / max(1, storm_count), 5, 100)
-
             damage_potential = (cy_wind_kmh / 180.0) ** 3
 
             cy_base = (
@@ -728,8 +727,8 @@ def run_for_point(lat: float, lon: float):
                 if pd.isna(cfr_base) or slr_mult is None:
                     coastal_s = np.nan
                 else:
-                    coastal_s = min(5.0, cfr_base * slr_mult)
-
+                    coastal_s = min(5.0, cfr_base + (slr_mult - 1.0))
+                    
         final_rows.append({'Hazard': 'Riverine Flood Risk', 'Column': col_name, 'Score': round(riverine_s, 3)})
         final_rows.append({'Hazard': 'Coastal Flood Risk', 'Column': col_name, 'Score': round(coastal_s, 3)})
 
@@ -738,11 +737,11 @@ def run_for_point(lat: float, lon: float):
             s_wf = wf_base
             s_cy = cy_base
         else:
-            s_wf = wf_base * (1 + t_anom * WILDFIRE_TEMP_SENS)
+            s_wf = wf_base * (1 + min(1.5, t_anom) * WILDFIRE_TEMP_SENS)
             if cy_base == 0.0:
                 s_cy = 0.0
             else:
-                s_cy = cy_base * (1 + t_anom * CYCLONE_TEMP_SENS)
+                s_cy = min(5.0, cy_base * (1 + t_anom * CYCLONE_TEMP_SENS * 0.5))
 
         s_wf = round(min(5.0, s_wf), 3)
         s_cy = round(min(5.0, s_cy), 3)
@@ -778,21 +777,32 @@ def run_for_point(lat: float, lon: float):
             'anom': t_anom_obs,
             's_anom': score(t_anom_obs, 0, 4),
             
-            # Precipitation change (annual mean vs baseline)
-            'pr_change_pct': ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100,
-            's_pr_change': score(
-                abs((obs_ann_pr - era5_pr_base) / era5_pr_base * 100),
-                10, 50
+            pr_pct = ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100
+            
+            'pr_change_pct': pr_pct,
+            's_pr_change': (
+                score(pr_pct, 10, 50) if pr_pct > 0        # wetter → flood-relevant
+                else score(abs(pr_pct), 10, 50)            # drier → drought-relevant
             ),
+
             
             # Extreme precipitation (annual max)
             's_max_pr': score(obs_dec['pr'].max(), 30, 500)
         }
     else:
+        # Data unavailable – do NOT assume low hazard
         m = {
-            's_max_t': 1.0, 's_days_35': 1.0, 's_min_t': 1.0, 's_days_0': 1.0,
-            's_anom': 0.0, 'pr_change_pct': 0.0, 's_pr_change': 0.0, 's_max_pr': 1.0
+            's_max_t': None,
+            's_days_35': None,
+            's_min_t': None,
+            's_days_0': None,
+            'anom': None,
+            's_anom': None,
+            'pr_change_pct': None,
+            's_pr_change': None,
+            's_max_pr': None
         }
+
 
     add_row('Observed_2024', m)
     obs_time = time.time() - obs_start
@@ -896,3 +906,4 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
