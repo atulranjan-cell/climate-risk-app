@@ -729,7 +729,13 @@ def run_for_point(lat: float, lon: float):
         # Other climate hazards (unchanged)
         final_rows.append({'Hazard': 'Temperature Anomaly', 'Column': col_name, 'Score': round(metrics['s_anom'], 3)})
         final_rows.append({'Hazard': 'Precipitation Change', 'Column': col_name, 'Score': round(metrics['s_pr_change'], 3)})
-        final_rows.append({'Hazard': 'Extreme Precipitation', 'Column': col_name, 'Score': round(metrics['s_max_pr'], 3)})
+        abs_pr_max = metrics.get('abs_pr_max', np.nan)
+
+        final_rows.append({
+            'Hazard': 'Extreme Precipitation',
+            'Column': col_name,
+            'Score': round(score(abs_pr_max, 20.0, 350.0), 3)
+        })
 
         # CLEAN WRI SEPARATION
         if is_obs:
@@ -822,7 +828,8 @@ def run_for_point(lat: float, lon: float):
         tmax_anom_obs = obs_window['temperature_2m_max'].mean() - hist_tmax_mean
         tmean_anom_obs = obs_window['temperature_2m'].mean() - era5_temp_base
         tmin_shift_obs = hist_tmin_mean - obs_window['temperature_2m_min'].mean()
-            
+        abs_pr_max = obs_window['pr'].max()
+        
         # ---- Chronic stress exposure (Observed) ----
         heat_days = count_exceedance_days(
             obs_window,
@@ -856,7 +863,8 @@ def run_for_point(lat: float, lon: float):
                 score(pr_pct, 10, 50) if pr_pct > 0        # wetter → flood-relevant
                 else score(abs(pr_pct), 10, 50)            # drier → drought-relevant
             ),
-            's_max_pr': score(obs_window['pr'].max(), 30, 500)
+            'abs_pr_max': abs_pr_max,
+            's_max_pr': score(abs_pr_max, 30, 350)
         }
     else:
         # Data unavailable
@@ -890,6 +898,7 @@ def run_for_point(lat: float, lon: float):
 
                 pr_sum_proj = trends['pr_sum']['slope'] * mid + trends['pr_sum']['intercept']
                 max_pr_proj = trends['max_pr']['slope'] * mid + trends['max_pr']['intercept']
+                abs_pr_max = max_pr_proj
                 pr_change_pct = ((pr_sum_proj - era5_pr_base) / era5_pr_base) * 100
                 pr_change_pct = np.clip(pr_change_pct, -30, 30)
 
@@ -916,7 +925,7 @@ def run_for_point(lat: float, lon: float):
                     's_anom': score(tmean_anom_trend, 0, 5),
                     'pr_change_pct': pr_change_pct,
                     's_pr_change': score(abs(pr_change_pct), 10, 50),
-                    's_max_pr': score(max_pr_proj, 30, 500)
+                    'abs_pr_max': abs_pr_max,
                 }
             else:
                 # Annual epoch data only (10 years)
@@ -947,7 +956,7 @@ def run_for_point(lat: float, lon: float):
 
                 # --- Precipitation remains bias-corrected ---
                 pr = perform_qm(era5_base, hist_cmip, sdf, 'pr', 'pr', 'pr')
-                
+                abs_pr_max = np.max(pr)
                 abs_tmax = np.max(mx)
                 abs_tmin = np.min(mn)
                 # --- SSP TEMPERATURE ANOMALIES (MODEL SPACE) ---
@@ -972,6 +981,7 @@ def run_for_point(lat: float, lon: float):
                     's_anom': score(tmean_anom, 0, 5),
                     'pr_change_pct': pr_change, 
                     's_pr_change': score(abs(pr_change), 10, 50),
+                    'abs_pr_max': abs_pr_max,
                     's_max_pr': score(np.max(pr), 30, 500)
                 }
             add_row(f'{scenario}_{ep}', m, year_proj=mid)
@@ -1001,5 +1011,6 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
 
 
