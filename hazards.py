@@ -76,8 +76,8 @@ def safe_to_float(val, default=0.3):
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
 EPOCH_MIDPOINTS = {'2030s': 2030, '2050s': 2050, '2080s': 2080}
 
-ERA5_RANGE = ('1960-01-01', '2024-12-31')
-CMIP6_HIST_RANGE = ('1960-01-01', '2014-12-31')
+ERA5_RANGE = ('1980-01-01', '2024-12-31')
+CMIP6_HIST_RANGE = ('1980-01-01', '2014-12-31')
 CMIP6_FUT_RANGE = ('2025-01-01', '2085-12-31')
 MODEL = 'MPI-ESM1-2-HR'
 CHUNK_SIZE_YEARS = 12
@@ -568,7 +568,7 @@ def run_for_point(lat: float, lon: float):
             )
     # ERA5 processing
     era5 = datasets['era5']; era5['year'] = era5['date'].dt.year
-    era5_base = era5[(era5['date'] >= '1960-01-01') & (era5['date'] <= '2014-12-31')]
+    era5_base = era5[(era5['date'] >= '1980-01-01') & (era5['date'] <= '2014-12-31')]
     era5_temp_base = era5_base['temperature_2m'].mean()
     
     era5_pr_base = era5_base.groupby(
@@ -815,6 +815,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
