@@ -693,11 +693,12 @@ def run_for_point(lat: float, lon: float):
 
         # FIXED TEMPERATURE HAZARDS (annual-data correct)
         # 1️⃣ Extreme Heat = anomaly of annual maximum temperature
-        tmax_anom = metrics.get('tmax_anom', 0.0)
+        abs_tmax = metrics.get('abs_tmax', np.nan)
+        
         final_rows.append({
             'Hazard': 'Extreme Heat',
             'Column': col_name,
-            'Score': round(score(tmax_anom, 0.5, 6.0), 3)
+            'Score': round(score(abs_tmax, 30.0, 50.0), 3)
         })
 
         # 2️⃣ CHRONIC HEAT STRESS (NEW: EXPOSURE-BASED)
@@ -709,12 +710,13 @@ def run_for_point(lat: float, lon: float):
         })
 
         # 3️⃣ Extreme Cold = reduction in cold extremes
-        tmin_shift = metrics.get('tmin_shift', 0.0)
+        abs_tmin = metrics.get('abs_tmin', np.nan)
+        
         final_rows.append({
             'Hazard': 'Extreme Cold',
             'Column': col_name,
-            'Score': round(score(tmin_shift, 0.5, 8.0), 3)
-        })
+            'Score': round(score(abs_tmin, -30.0, 5.0, inverted=True), 3)
+        })})
 
         # 4️⃣ CHRONIC COLD STRESS (NEW: EXPOSURE-BASED)
         cold_days = metrics.get('chronic_cold_days', 0)
@@ -815,6 +817,8 @@ def run_for_point(lat: float, lon: float):
         pr_pct = ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100
         
         # FIXED TEMPERATURE ANOMALIES (climate-correct)
+        abs_tmax = obs_window['temperature_2m_max'].max()
+        abs_tmin = obs_window['temperature_2m_min'].min()
         tmax_anom_obs = obs_window['temperature_2m_max'].mean() - hist_tmax_mean
         tmean_anom_obs = obs_window['temperature_2m'].mean() - era5_temp_base
         tmin_shift_obs = hist_tmin_mean - obs_window['temperature_2m_min'].mean()
@@ -835,6 +839,8 @@ def run_for_point(lat: float, lon: float):
             
         m = {
             # FIXED TEMPERATURE HAZARDS
+            'abs_tmax': abs_tmax,
+            'abs_tmin': abs_tmin,
             'tmax_anom': tmax_anom_obs,
             'tmean_anom': tmean_anom_obs,
             'tmin_shift': tmin_shift_obs,
@@ -875,7 +881,9 @@ def run_for_point(lat: float, lon: float):
                 tmax_proj = trends['max_t']['slope'] * mid + trends['max_t']['intercept']
                 tmin_proj = trends['min_t']['slope'] * mid + trends['min_t']['intercept']
                 tmean_proj = trends['mean_t']['slope'] * mid + trends['mean_t']['intercept']
-                
+
+                abs_tmax = tmax_proj
+                abs_tmin = tmin_proj
                 tmax_anom_trend = tmax_proj - hist_tmax_mean
                 tmean_anom_trend = tmean_proj - era5_temp_base
                 tmin_shift_trend = hist_tmin_mean - tmin_proj
@@ -898,6 +906,8 @@ def run_for_point(lat: float, lon: float):
                 cold_days = int(base_obs_days_cold * max(0.0, 1 - temp_delta / 4.0))
 
                 m = {
+                    'abs_tmax': abs_tmax,
+                    'abs_tmin': abs_tmin,
                     'tmax_anom': tmax_anom_trend,
                     'tmean_anom': tmean_anom_trend,
                     'tmin_shift': tmin_shift_trend,
@@ -938,6 +948,8 @@ def run_for_point(lat: float, lon: float):
                 # --- Precipitation remains bias-corrected ---
                 pr = perform_qm(era5_base, hist_cmip, sdf, 'pr', 'pr', 'pr')
                 
+                abs_tmax = np.max(mx)
+                abs_tmin = np.min(mn)
                 # --- SSP TEMPERATURE ANOMALIES (MODEL SPACE) ---
                 tmax_anom = np.mean(mx) - cmip_tmax_base
                 tmean_anom = np.mean(av) - cmip_tmean_base
@@ -950,6 +962,8 @@ def run_for_point(lat: float, lon: float):
                 cold_days = int(np.sum(av < cold_thresh) * 365 / years)
 
                 m = {
+                    'abs_tmax': abs_tmax,
+                    'abs_tmin': abs_tmin,
                     'tmax_anom': tmax_anom,
                     'tmean_anom': tmean_anom,
                     'tmin_shift': tmin_shift,
@@ -987,3 +1001,4 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
