@@ -149,7 +149,7 @@ def get_annual_features(
 
             img = ee.Image(
                 ee.Algorithms.If(
-                    reducer == 'sum',
+                    reducer == 'total_precipitation_sum',
                     img.sum(),
                     img.mean()
                 )
@@ -583,8 +583,8 @@ def run_for_point(lat: float, lon: float):
             cy_base = 0.5   # minimal residual coastal risk
         else:
             cy_wind_kmh = max_wind_knots * 1.852
-            rp_years = max(5, 34 / storm_count)   # avoid explosive return periods
-    
+            rp_years = np.clip(34 / max(1, storm_count), 5, 100)
+
             damage_potential = (cy_wind_kmh / 180.0) ** 3   # higher normalization
     
             cy_base = (
@@ -712,8 +712,8 @@ def run_for_point(lat: float, lon: float):
         obs_ann_pr = obs_dec['pr'].mean()
         
         # Heat / cold day counts (approximated from annual max/min)
-        dec_heat = (obs_dec['temperature_2m_max'] > heat_threshold).sum() * 36.5  # ~days/year
-        dec_cold = (obs_dec['temperature_2m_min'] < cold_threshold).sum() * 36.5
+        dec_heat = (obs_dec['temperature_2m_max'] > heat_threshold).sum() * 365  # ~days/year
+        dec_cold = (obs_dec['temperature_2m_min'] < cold_threshold).sum() * 365
         
         # Temperature anomaly (raw, °C)
         t_anom_obs = obs_dec['temperature_2m'].mean() - era5_temp_base
@@ -843,6 +843,7 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
 
 
 
