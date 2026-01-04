@@ -564,6 +564,14 @@ def run_for_point(lat: float, lon: float):
         hist_cmip['tasmin'] -= 273.15
         hist_cmip['pr'] *= 86400  # daily to mm
     
+    # ===============================
+    # CMIP6 HISTORICAL BASELINES
+    # (MODEL SPACE – for SSP risk)
+    # ===============================
+    cmip_tmean_base = hist_cmip['tas'].mean()
+    cmip_tmax_base  = hist_cmip['tasmax'].mean()
+    cmip_tmin_base  = hist_cmip['tasmin'].mean()
+    
     if era5.empty:
         raise HazardError(
             stage="ERA5_FETCH",
@@ -888,16 +896,19 @@ def run_for_point(lat: float, lon: float):
                 sdf = cmip_cache[cache_key]
                 if sdf.empty: continue
                 
-                mx = perform_qm(era5_base, hist_cmip, sdf, 'temperature_2m_max', 'tasmax', 'tasmax')
-                mn = perform_qm(era5_base, hist_cmip, sdf, 'temperature_2m_min', 'tasmin', 'tasmin')
-                av = perform_qm(era5_base, hist_cmip, sdf, 'temperature_2m', 'tas', 'tas')
+                # --- SSP TEMPERATURE: USE RAW CMIP6 (NO QM) ---
+                mx = sdf['tasmax'].values
+                mn = sdf['tasmin'].values
+                av = sdf['tas'].values
+
+                # --- Precipitation remains bias-corrected ---
                 pr = perform_qm(era5_base, hist_cmip, sdf, 'pr', 'pr', 'pr')
                 
-                # FIXED ANOMALIES
-                tmax_anom = np.mean(mx) - hist_tmax_mean
-                tmean_anom = np.mean(av) - era5_temp_base
-                tmin_shift = hist_tmin_mean - np.mean(mn)
-                tmean_shift_cold = era5_temp_base - np.mean(av)
+                # --- SSP TEMPERATURE ANOMALIES (MODEL SPACE) ---
+                tmax_anom = np.mean(mx) - cmip_tmax_base
+                tmean_anom = np.mean(av) - cmip_tmean_base
+                tmin_shift = cmip_tmin_base - np.mean(mn)
+                tmean_shift_cold = cmip_tmean_base - np.mean(av)
                 pr_change = ((np.mean(pr) - era5_pr_base) / era5_pr_base) * 100
 
                 m = {
