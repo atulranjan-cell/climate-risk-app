@@ -495,8 +495,6 @@ def get_fire_cyclone_baselines(geom):
         .filterBounds(geom) \
         .filter(ee.Filter.gte('SEASON', 1990))
 
-    storm_count = tracks.distinct('SID').size()
-
     def clean_wind(f):
         wind_cols = [
             'WMO_WIND', 'USA_WIND', 'TOKYO_WIND',
@@ -514,7 +512,7 @@ def get_fire_cyclone_baselines(geom):
     return ee.Dictionary({
         'NDVI': ndvi_val,
         'wf_count': wf_count,
-        'storm_count': storm_count,
+        'storm_count': tracks.distinct('SID').size(),
         'max_wind_knots': max_wind
     }).getInfo()
 
@@ -662,24 +660,54 @@ def run_for_point(lat: float, lon: float):
 
     def add_row(col_name, metrics, year_proj=None):
         is_obs = 'Observed' in col_name
-        pr_pct, t_anom = metrics.get('pr_change_pct', 0.0), metrics.get('anom', 0.0)
+        pr_pct, t_anom = metrics.get('pr_change_pct', 0.0), metrics.get('tmean_anom', 0.0)
 
         # FIXED TEMPERATURE HAZARDS (annual-data correct)
         # 1️⃣ Extreme Heat = anomaly of annual maximum temperature
         tmax_anom = metrics.get('tmax_anom', 0.0)
-        final_rows.append({'Hazard': 'Extreme Heat', 'Column': col_name, 'Score': round(score(tmax_anom, 0.5, 6.0), 3)})
+        final_rows.append({
+            'Hazard': 'Extreme Heat',
+            'Column': col_name,
+            'Score': round(score(tmax_anom, 0.5, 6.0), 3)
+        })
 
-        # 2️⃣ Chronic Heat Stress = mean temperature anomaly
+        # 2️⃣ Chronic Heat Stress (BLENDED: mean + extreme)
         tmean_anom = metrics.get('tmean_anom', 0.0)
-        final_rows.append({'Hazard': 'Chronic Heat Stress', 'Column': col_name, 'Score': round(score(tmean_anom, 0.5, 4.0), 3)})
+        tmax_anom_val = metrics.get('tmax_anom', 0.0)
+
+        chronic_heat_signal = (
+            0.6 * tmean_anom +
+            0.4 * tmax_anom_val
+        )
+
+        final_rows.append({
+            'Hazard': 'Chronic Heat Stress',
+            'Column': col_name,
+            'Score': round(score(chronic_heat_signal, 0.5, 4.5), 3)
+        })
 
         # 3️⃣ Extreme Cold = reduction in cold extremes
         tmin_shift = metrics.get('tmin_shift', 0.0)
-        final_rows.append({'Hazard': 'Extreme Cold', 'Column': col_name, 'Score': round(score(tmin_shift, 0.5, 8.0), 3)})
+        final_rows.append({
+            'Hazard': 'Extreme Cold',
+            'Column': col_name,
+            'Score': round(score(tmin_shift, 0.5, 8.0), 3)
+        })
 
-        # 4️⃣ Chronic Cold Stress = persistent cold climate
+        # 4️⃣ Chronic Cold Stress (BLENDED: mean + extreme)
         tmean_shift_cold = metrics.get('tmean_shift_cold', 0.0)
-        final_rows.append({'Hazard': 'Chronic Cold Stress', 'Column': col_name, 'Score': round(score(tmean_shift_cold, 0.5, 6.0), 3)})
+        tmin_shift_val = metrics.get('tmin_shift', 0.0)
+
+        chronic_cold_signal = (
+            0.6 * tmean_shift_cold +
+            0.4 * tmin_shift_val
+        )
+
+        final_rows.append({
+            'Hazard': 'Chronic Cold Stress',
+            'Column': col_name,
+            'Score': round(score(chronic_cold_signal, 0.5, 6.0), 3)
+        })
 
         # Other climate hazards (unchanged)
         final_rows.append({'Hazard': 'Temperature Anomaly', 'Column': col_name, 'Score': round(metrics['s_anom'], 3)})
@@ -785,7 +813,7 @@ def run_for_point(lat: float, lon: float):
             'tmean_shift_cold': tmean_shift_cold_obs,
             
             # Legacy metrics (for continuity)
-            'anom': tmean_anom_obs,
+            'tmean_anom': tmean_anom_obs,
             's_anom': score(tmean_anom_obs, 0, 4),
             'pr_change_pct': pr_pct,
             's_pr_change': (
@@ -798,7 +826,7 @@ def run_for_point(lat: float, lon: float):
         # Data unavailable
         m = {
             'tmax_anom': np.nan, 'tmean_anom': np.nan, 'tmin_shift': np.nan, 'tmean_shift_cold': np.nan,
-            'anom': np.nan, 's_anom': np.nan, 'pr_change_pct': np.nan, 's_pr_change': np.nan, 's_max_pr': np.nan
+            'tmean_anom': np.nan, 's_anom': np.nan, 'pr_change_pct': np.nan, 's_pr_change': np.nan, 's_max_pr': np.nan
         }
 
     add_row('Observed_2024', m)
@@ -832,7 +860,7 @@ def run_for_point(lat: float, lon: float):
                     'tmean_anom': tmean_anom_trend,
                     'tmin_shift': tmin_shift_trend,
                     'tmean_shift_cold': tmean_shift_cold_trend,
-                    'anom': tmean_anom_trend,
+                    'tmean_anom': tmean_anom_trend,
                     's_anom': score(tmean_anom_trend, 0, 5),
                     'pr_change_pct': pr_change_pct,
                     's_pr_change': score(abs(pr_change_pct), 10, 50),
@@ -877,7 +905,7 @@ def run_for_point(lat: float, lon: float):
                     'tmean_anom': tmean_anom,
                     'tmin_shift': tmin_shift,
                     'tmean_shift_cold': tmean_shift_cold,
-                    'anom': tmean_anom, 
+                    'tmean_anom': tmean_anom, 
                     's_anom': score(tmean_anom, 0, 5),
                     'pr_change_pct': pr_change, 
                     's_pr_change': score(abs(pr_change), 10, 50),
