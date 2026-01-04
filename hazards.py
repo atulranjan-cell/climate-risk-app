@@ -274,7 +274,8 @@ def sample_nearest_wri(coll, point, use_baseline_bau30, year=None, scenario_name
             return {
                 'Water Stress': safe_float(props, f'{pref}{y_key}_ws_x_s'),
                 'Seasonal Variability': safe_float(props, f'{pref}{y_key}_sv_x_s'),
-                'Interannual Variability': safe_float(props, f'{pref}{y_key}_iv_x_s')
+                'Interannual Variability': safe_float(props, f'{pref}{y_key}_iv_x_s'),
+                'Drought Risk': None
             }
     except:
         return None
@@ -814,6 +815,7 @@ def run_for_point(lat: float, lon: float):
     return df_final
 
                                      
+
 
 
 
