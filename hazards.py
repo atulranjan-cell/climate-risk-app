@@ -885,36 +885,41 @@ def run_for_point(lat: float, lon: float):
         for ep, (sy, ey) in EPOCHS.items():
             mid = EPOCH_MIDPOINTS[ep]
             if scenario == 'Trend':
-                # Trend projection (FIXED)
-                # Trend extremes = shift observed extreme by mean warming
+                tmean_proj = trends['mean_t']['slope'] * mid + trends['mean_t']['intercept']
+                tmean_anom_trend = tmean_proj - era5_temp_base
+                
                 abs_tmax = obs_window['temperature_2m_max'].quantile(0.99) + tmean_anom_trend
                 abs_tmin = obs_window['temperature_2m_min'].quantile(0.01) + tmean_anom_trend
-                tmean_proj = trends['mean_t']['slope'] * mid + trends['mean_t']['intercept']
+                
+                tmax_proj = trends['max_t']['slope'] * mid + trends['max_t']['intercept']
+                tmin_proj = trends['min_t']['slope'] * mid + trends['min_t']['intercept']
+                
                 tmax_anom_trend = tmax_proj - hist_tmax_mean
-                tmean_anom_trend = tmean_proj - era5_temp_base
                 tmin_shift_trend = hist_tmin_mean - tmin_proj
-
+                
                 pr_sum_proj = trends['pr_sum']['slope'] * mid + trends['pr_sum']['intercept']
-                max_pr_proj = trends['max_pr']['slope'] * mid + trends['max_pr']['intercept']
-                abs_pr_max = max_pr_proj
+                abs_pr_max = trends['max_pr']['slope'] * mid + trends['max_pr']['intercept']
+                
                 pr_change_pct = ((pr_sum_proj - era5_pr_base) / era5_pr_base) * 100
                 pr_change_pct = np.clip(pr_change_pct, -30, 30)
-
-                # ---- Chronic stress exposure (Trend – scaled) ----
+                
                 base_obs_days_heat = count_exceedance_days(
-                    obs_window, 'temperature_2m', heat_thresh, 'above'
+                    obs_window, 'temperature_2m_max', heat_thresh, 'above'
                 )
                 base_obs_days_cold = count_exceedance_days(
-                    obs_window, 'temperature_2m', cold_thresh, 'below'
+                    obs_window, 'temperature_2m_min', cold_thresh, 'below'
                 )
-
-                temp_delta = tmean_anom_trend  # °C change vs baseline
-                heat_days = int(base_obs_days_heat * (1 + temp_delta / 4.0))
-                cold_days = int(base_obs_days_cold * max(0.0, 1 - temp_delta / 4.0))
-
+                
+                heat_days = int(
+                    base_obs_days_heat * np.clip(1 + 0.15 * tmean_anom_trend, 0.7, 2.5)
+                )
+                cold_days = int(
+                    base_obs_days_cold * np.clip(1 - 0.20 * tmean_anom_trend, 0.0, 1.0)
+                )
+                
                 m = {
-                    abs_tmax = np.percentile(mx, 99),
-                    abs_tmin = np.percentile(mn, 1),
+                    'abs_tmax': abs_tmax,
+                    'abs_tmin': abs_tmin,
                     'tmax_anom': tmax_anom_trend,
                     'tmean_anom': tmean_anom_trend,
                     'tmin_shift': tmin_shift_trend,
@@ -925,6 +930,7 @@ def run_for_point(lat: float, lon: float):
                     's_pr_change': score(abs(pr_change_pct), 10, 50),
                     'abs_pr_max': abs_pr_max,
                 }
+
             else:
                 # Annual epoch data only (10 years)
                 cache_key = (scenario, ep)
@@ -1009,6 +1015,7 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
 
 
 
