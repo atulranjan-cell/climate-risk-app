@@ -519,7 +519,7 @@ def get_fire_cyclone_baselines(geom):
     }).getInfo()
 
 # -------------------------------------------------------------------------
-# 5. MAIN API FUNCTION (REFACTORED)
+# 5. MAIN API FUNCTION (CORRECTED TEMPERATURE HAZARDS)
 # -------------------------------------------------------------------------
 def run_for_point(lat: float, lon: float):
     try:
@@ -640,8 +640,8 @@ def run_for_point(lat: float, lon: float):
                 np.clip(damage_potential * 5.0, 0.5, 4.5) * 0.8 +
                 np.clip(15.0 / rp_years, 0.5, 4.5) * 0.2
             )
-    
-    # ERA5 processing (now annual data)
+
+    # FIXED BASELINE COMPUTATION (climate-science correct)
     era5_base = era5[(era5['year'] >= 1980) & (era5['year'] <= 2014)]
     era5_temp_base = era5_base['temperature_2m'].mean()
     
@@ -649,11 +649,9 @@ def run_for_point(lat: float, lon: float):
     if pd.isna(era5_pr_base) or era5_pr_base == 0:
         era5_pr_base = 1e-6
 
-    hist_tmax = era5_base['temperature_2m_max']
-    hist_tmin = era5_base['temperature_2m_min']
-
-    heat_threshold = hist_tmax.quantile(0.95)
-    cold_threshold = hist_tmin.quantile(0.05)
+    # BASELINE TEMPERATURE STATISTICS (used for anomalies)
+    hist_tmax_mean = era5_base['temperature_2m_max'].mean()
+    hist_tmin_mean = era5_base['temperature_2m_min'].mean()
 
     trends = {}
     for m_name, col, func in [('max_t','temperature_2m_max','max'),('min_t','temperature_2m_min','min'),('mean_t','temperature_2m','mean'),
@@ -666,12 +664,27 @@ def run_for_point(lat: float, lon: float):
         is_obs = 'Observed' in col_name
         pr_pct, t_anom = metrics.get('pr_change_pct', 0.0), metrics.get('anom', 0.0)
 
-        # Climate hazards (temperature/precipitation)
-        for h, s in [('Extreme Heat', metrics['s_max_t']), ('Chronic Heat Stress', metrics['s_days_35']),
-                     ('Extreme Cold', metrics['s_min_t']), ('Chronic Cold Stress', metrics['s_days_0']),
-                     ('Temperature Anomaly', metrics['s_anom']), ('Precipitation Change', metrics['s_pr_change']),
-                     ('Extreme Precipitation', metrics['s_max_pr'])]:
-            final_rows.append({'Hazard': h, 'Column': col_name, 'Score': round(s, 3)})
+        # FIXED TEMPERATURE HAZARDS (annual-data correct)
+        # 1️⃣ Extreme Heat = anomaly of annual maximum temperature
+        tmax_anom = metrics.get('tmax_anom', 0.0)
+        final_rows.append({'Hazard': 'Extreme Heat', 'Column': col_name, 'Score': round(score(tmax_anom, 0.5, 6.0), 3)})
+
+        # 2️⃣ Chronic Heat Stress = mean temperature anomaly
+        tmean_anom = metrics.get('tmean_anom', 0.0)
+        final_rows.append({'Hazard': 'Chronic Heat Stress', 'Column': col_name, 'Score': round(score(tmean_anom, 0.5, 4.0), 3)})
+
+        # 3️⃣ Extreme Cold = reduction in cold extremes
+        tmin_shift = metrics.get('tmin_shift', 0.0)
+        final_rows.append({'Hazard': 'Extreme Cold', 'Column': col_name, 'Score': round(score(tmin_shift, 0.5, 8.0), 3)})
+
+        # 4️⃣ Chronic Cold Stress = persistent cold climate
+        tmean_shift_cold = metrics.get('tmean_shift_cold', 0.0)
+        final_rows.append({'Hazard': 'Chronic Cold Stress', 'Column': col_name, 'Score': round(score(tmean_shift_cold, 0.5, 6.0), 3)})
+
+        # Other climate hazards (unchanged)
+        final_rows.append({'Hazard': 'Temperature Anomaly', 'Column': col_name, 'Score': round(metrics['s_anom'], 3)})
+        final_rows.append({'Hazard': 'Precipitation Change', 'Column': col_name, 'Score': round(metrics['s_pr_change'], 3)})
+        final_rows.append({'Hazard': 'Extreme Precipitation', 'Column': col_name, 'Score': round(metrics['s_max_pr'], 3)})
 
         # CLEAN WRI SEPARATION
         if is_obs:
@@ -749,58 +762,44 @@ def run_for_point(lat: float, lon: float):
         final_rows.append({'Hazard': 'Wildfire', 'Column': col_name, 'Score': s_wf})
         final_rows.append({'Hazard': 'Cyclone', 'Column': col_name, 'Score': s_cy})
 
-    # Execute Observed 2024
+    # Execute Observed 2024 (FIXED)
     obs_start = time.time()
     obs_dec = era5[(era5['year'] >= 2015) & (era5['year'] <= 2024)]
     
     if not obs_dec.empty:
         # Annual observed precipitation (mm/year)
         obs_ann_pr = obs_dec['pr'].mean()
-        
-        # Heat / cold day counts (approximated from annual max/min)
-        dec_heat = (obs_dec['temperature_2m_max'] > heat_threshold).sum() * 365
-        dec_cold = (obs_dec['temperature_2m_min'] < cold_threshold).sum() * 365
-        
-        # Temperature anomaly (raw, °C)
-        t_anom_obs = obs_dec['temperature_2m'].mean() - era5_temp_base
         pr_pct = ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100
+        
+        # FIXED TEMPERATURE ANOMALIES (climate-correct)
+        tmax_anom_obs = obs_dec['temperature_2m_max'].mean() - hist_tmax_mean
+        tmean_anom_obs = obs_dec['temperature_2m'].mean() - era5_temp_base
+        tmin_shift_obs = hist_tmin_mean - obs_dec['temperature_2m_min'].mean()
+        tmean_shift_cold_obs = era5_temp_base - obs_dec['temperature_2m'].mean()
             
         m = {
-            # Temperature extremes
-            's_max_t': score(obs_dec['temperature_2m_max'].max(), 30, 50),
+            # FIXED TEMPERATURE HAZARDS
+            'tmax_anom': tmax_anom_obs,
+            'tmean_anom': tmean_anom_obs,
+            'tmin_shift': tmin_shift_obs,
+            'tmean_shift_cold': tmean_shift_cold_obs,
             
-            # Approx annualized intensity from decade counts
-            's_days_35': score(dec_heat / 10, 5, 150),
-            's_min_t': score(obs_dec['temperature_2m_min'].min(), -30, 5, inverted=True),
-            's_days_0': score(dec_cold / 10, 1, 90),
-            
-            # Temperature anomaly
-            'anom': t_anom_obs,
-            's_anom': score(t_anom_obs, 0, 4),
+            # Legacy metrics (for continuity)
+            'anom': tmean_anom_obs,
+            's_anom': score(tmean_anom_obs, 0, 4),
             'pr_change_pct': pr_pct,
             's_pr_change': (
                 score(pr_pct, 10, 50) if pr_pct > 0        # wetter → flood-relevant
                 else score(abs(pr_pct), 10, 50)            # drier → drought-relevant
             ),
-
-            
-            # Extreme precipitation (annual max)
             's_max_pr': score(obs_dec['pr'].max(), 30, 500)
         }
     else:
-        # Data unavailable – do NOT assume low hazard
+        # Data unavailable
         m = {
-            's_max_t': None,
-            's_days_35': None,
-            's_min_t': None,
-            's_days_0': None,
-            'anom': None,
-            's_anom': None,
-            'pr_change_pct': None,
-            's_pr_change': None,
-            's_max_pr': None
+            'tmax_anom': np.nan, 'tmean_anom': np.nan, 'tmin_shift': np.nan, 'tmean_shift_cold': np.nan,
+            'anom': np.nan, 's_anom': np.nan, 'pr_change_pct': np.nan, 's_pr_change': np.nan, 's_max_pr': np.nan
         }
-
 
     add_row('Observed_2024', m)
     obs_time = time.time() - obs_start
@@ -813,32 +812,32 @@ def run_for_point(lat: float, lon: float):
         for ep, (sy, ey) in EPOCHS.items():
             mid = EPOCH_MIDPOINTS[ep]
             if scenario == 'Trend':
-                t_mean = trends['mean_t']['slope'] * mid + trends['mean_t']['intercept']
-                heat_shift = (trends['max_t']['slope'] * mid + trends['max_t']['intercept']) - heat_threshold
-                cold_shift = cold_threshold - (trends['min_t']['slope'] * mid + trends['min_t']['intercept'])
+                # Trend projection (FIXED)
+                tmax_proj = trends['max_t']['slope'] * mid + trends['max_t']['intercept']
+                tmin_proj = trends['min_t']['slope'] * mid + trends['min_t']['intercept']
+                tmean_proj = trends['mean_t']['slope'] * mid + trends['mean_t']['intercept']
+                
+                tmax_anom_trend = tmax_proj - hist_tmax_mean
+                tmean_anom_trend = tmean_proj - era5_temp_base
+                tmin_shift_trend = hist_tmin_mean - tmin_proj
+                tmean_shift_cold_trend = era5_temp_base - tmean_proj
 
-                dec_heat = max(0, 0.02 * 365 * (1 + heat_shift / 2.0))
-                dec_cold = max(0, 0.02 * 365 * (1 + cold_shift / 2.0))
-
-                min_t_proj = (trends['min_t']['slope'] * mid + trends['min_t']['intercept'])
                 pr_sum_proj = trends['pr_sum']['slope'] * mid + trends['pr_sum']['intercept']
                 max_pr_proj = trends['max_pr']['slope'] * mid + trends['max_pr']['intercept']
                 pr_change_pct = ((pr_sum_proj - era5_pr_base) / era5_pr_base) * 100
                 pr_change_pct = np.clip(pr_change_pct, -30, 30)
 
-                dec_heat = max(dec_heat * 10, 0)
-                dec_cold = max(dec_cold * 10, 0)
                 m = {
-                        's_max_t': score(trends['max_t']['slope'] * mid + trends['max_t']['intercept'], 30, 50),
-                        's_min_t': score(min_t_proj, -30, 5, inverted=True),
-                        's_days_35': score(dec_heat / 10, 5, 150),
-                        's_days_0': score(dec_cold / 10, 1, 90),
-                        'anom': t_mean - era5_temp_base,
-                        's_anom': score(t_mean - era5_temp_base, 0, 5),
-                        'pr_change_pct': pr_change_pct,
-                        's_pr_change': score(abs(pr_change_pct), 10, 50),
-                        's_max_pr': score(max_pr_proj, 30, 500)
-                    }
+                    'tmax_anom': tmax_anom_trend,
+                    'tmean_anom': tmean_anom_trend,
+                    'tmin_shift': tmin_shift_trend,
+                    'tmean_shift_cold': tmean_shift_cold_trend,
+                    'anom': tmean_anom_trend,
+                    's_anom': score(tmean_anom_trend, 0, 5),
+                    'pr_change_pct': pr_change_pct,
+                    's_pr_change': score(abs(pr_change_pct), 10, 50),
+                    's_max_pr': score(max_pr_proj, 30, 500)
+                }
             else:
                 # Annual epoch data only (10 years)
                 cache_key = (scenario, ep)
@@ -865,18 +864,25 @@ def run_for_point(lat: float, lon: float):
                 mn = perform_qm(era5_base, hist_cmip, sdf, 'temperature_2m_min', 'tasmin', 'tasmin')
                 av = perform_qm(era5_base, hist_cmip, sdf, 'temperature_2m', 'tas', 'tas')
                 pr = perform_qm(era5_base, hist_cmip, sdf, 'pr', 'pr', 'pr')
-                t_anom = np.mean(av) - era5_temp_base
+                
+                # FIXED ANOMALIES
+                tmax_anom = np.mean(mx) - hist_tmax_mean
+                tmean_anom = np.mean(av) - era5_temp_base
+                tmin_shift = hist_tmin_mean - np.mean(mn)
+                tmean_shift_cold = era5_temp_base - np.mean(av)
                 pr_change = ((np.mean(pr) - era5_pr_base) / era5_pr_base) * 100
-                dec_heat = np.sum(mx > heat_threshold) * 36.5
-                dec_cold = np.sum(mn < cold_threshold) * 36.5
 
-                m = {'s_max_t': score(np.max(mx), 30, 50),
-                     's_min_t': score(np.min(mn), -30, 5, True),
-                     's_days_35': score(dec_heat / 10, 5, 150),
-                     's_days_0': score(dec_cold / 10, 1, 90),
-                     'anom': t_anom, 's_anom': score(t_anom, 0, 5),
-                     'pr_change_pct': pr_change, 's_pr_change': score(abs(pr_change), 10, 50),
-                     's_max_pr': score(np.max(pr), 30, 500)}
+                m = {
+                    'tmax_anom': tmax_anom,
+                    'tmean_anom': tmean_anom,
+                    'tmin_shift': tmin_shift,
+                    'tmean_shift_cold': tmean_shift_cold,
+                    'anom': tmean_anom, 
+                    's_anom': score(tmean_anom, 0, 5),
+                    'pr_change_pct': pr_change, 
+                    's_pr_change': score(abs(pr_change), 10, 50),
+                    's_max_pr': score(np.max(pr), 30, 500)
+                }
             add_row(f'{scenario}_{ep}', m, year_proj=mid)
     scenarios_time = time.time() - scenarios_start
 
@@ -904,6 +910,3 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
-
-
-
