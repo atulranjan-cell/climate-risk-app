@@ -15,9 +15,14 @@ logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 
 # EE Objects (hoisted)
-DEM_IMG = ee.Image("NASA/NASADEM_HGT/001")
-WRI_BASELINE_FC = ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/baseline_annual")
-WRI_FUTURE_FC = ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/future_annual")
+def get_dem_img():
+    return ee.Image("NASA/NASADEM_HGT/001")
+
+def get_wri_baseline_fc():
+    return ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/baseline_annual")
+
+def get_wri_future_fc():
+    return ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/future_annual")
 
 # Hazard sensitivity constants
 WILDFIRE_TEMP_SENS = 0.16
@@ -100,7 +105,7 @@ def is_coastal(geom, max_dist_km=50):
     - within max_dist_km of ocean
     """
     try:
-        elev = DEM_IMG.select("elevation") \
+        elev = get_dem_img().select("elevation") \
             .reduceRegion(
                 ee.Reducer.mean(),
                 geom,
@@ -234,7 +239,7 @@ def perform_qm(train_df, hist_df, fut_df, t_col, h_col, f_col):
 # -------------------------------------------------------------------------
 def get_ipcc_slr_multiplier(year, scenario, geom):
     try:
-        local_elev = DEM_IMG.select('elevation').reduceRegion(
+        local_elev = get_dem_img().select('elevation').reduceRegion(
             reducer=ee.Reducer.mean(),
             geometry=geom,
             scale=30,
@@ -278,7 +283,7 @@ def extract_wri_future_strict(geom, geom_coords):
 
         # Find nearest polygon ONCE
         nearest = (
-            WRI_FUTURE_FC
+            get_wri_future_fc()
             .map(lambda f: f.set('distance', ee.Feature(pt).distance(f.geometry())))
             .sort('distance')
             .first()
@@ -360,9 +365,9 @@ def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=No
     lon, lat = geom_coords
 
     if use_baseline_bau30:
-        coll = WRI_BASELINE_FC
+        coll = get_wri_baseline_fc()
     else:
-        coll = WRI_FUTURE_FC
+        coll = get_wri_future_fc()
 
     center_start = time.time()
     center_pt = ee.Geometry.Point([lon, lat])
@@ -373,7 +378,7 @@ def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=No
     if use_baseline_bau30 and center_result and system_metrics_invalid(center_result):
         try:
             bau_2030 = sample_nearest_wri(
-                WRI_FUTURE_FC,
+                get_wri_future_fc(),
                 center_pt,
                 use_baseline_bau30=False,
                 year=2030,
@@ -891,3 +896,4 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
