@@ -716,7 +716,7 @@ def run_for_point(lat: float, lon: float):
             'Hazard': 'Extreme Cold',
             'Column': col_name,
             'Score': round(score(abs_tmin, -30.0, 5.0, inverted=True), 3)
-        })})
+        })
 
         # 4️⃣ CHRONIC COLD STRESS (NEW: EXPOSURE-BASED)
         cold_days = metrics.get('chronic_cold_days', 0)
@@ -1001,4 +1001,5 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
 
