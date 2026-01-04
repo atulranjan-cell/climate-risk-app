@@ -183,19 +183,29 @@ def score(val, min_v, max_v, inverted=False):
     return round(np.clip(n, 0, 1) * 5, 3)
 
 def perform_qm(train_df, hist_df, fut_df, t_col, h_col, f_col):
-    if train_df.empty or hist_df.empty or fut_df.empty: return fut_df[f_col].values
-    obs_vals = train_df[t_col].values; obs_months = train_df['year'] % 12 + 1  # approximate
-    hist_vals = hist_df[h_col].values; hist_months = hist_df['year'] % 12 + 1
-    fut_vals = fut_df[f_col].values; fut_months = fut_df['year'] % 12 + 1
-    corrected = np.zeros(len(fut_vals))
-    for m in range(1, 13):
-        o_m = obs_vals[obs_months == m]; h_m = hist_vals[hist_months == m]
-        f_idx = (fut_months == m); f_m = fut_vals[f_idx]
-        if len(o_m) == 0 or len(h_m) == 0 or len(f_m) == 0: corrected[f_idx] = f_m; continue
-        ranks = np.searchsorted(h_m, f_m) / len(h_m)
-        corrected[f_idx] = np.quantile(o_m, np.clip(ranks, 0, 0.9999))
-    return corrected
+    """
+    Annual quantile mapping (NO monthly logic).
+    Correct for annual-mean / annual-extreme climate data.
+    """
+    if train_df.empty or hist_df.empty or fut_df.empty:
+        return fut_df[f_col].values
 
+    # Observed (ERA5) reference distribution
+    obs = np.sort(train_df[t_col].values)
+
+    # Historical model distribution
+    hist = np.sort(hist_df[h_col].values)
+
+    # Future model values
+    fut = fut_df[f_col].values
+
+    # Percentile rank of future values in historical model space
+    ranks = np.searchsorted(hist, fut) / len(hist)
+
+    # Map those ranks onto observed distribution
+    corrected = np.quantile(obs, np.clip(ranks, 0, 0.9999))
+
+    return corrected
 # -------------------------------------------------------------------------
 # 2. IPCC SEA LEVEL RISE MULTIPLIER
 # -------------------------------------------------------------------------
@@ -361,6 +371,7 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
     if center_result and sum(not pd.isna(center_result.get(k)) for k in WRI_EVENT_KEYS) >= 1:
         center_result['_source'] = 'CENTER'
         total_time = time.time() - start_time
+        center_result['_method'] = 'CENTER'
         return center_result, {
             'method': 'CENTER',
             'total_time': total_time
@@ -414,6 +425,7 @@ def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_basel
 
         radius_used, name_used = valid_candidates[0][0], valid_candidates[0][2]
         total_time = time.time() - start_time
+        nearest['_method'] = f'PARALLEL_{radius_used}km'
         nearest['_source'] = f'PARALLEL_{radius_used}km'
         return nearest, {
             'method': f'PARALLEL_{radius_used}km',
@@ -843,6 +855,7 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
 
 
 
