@@ -698,7 +698,7 @@ def run_for_point(lat: float, lon: float):
         final_rows.append({
             'Hazard': 'Extreme Heat',
             'Column': col_name,
-            'Score': round(score(abs_tmax, 30.0, 50.0), 3)
+            'Score': score(abs_tmax, 30.0, 50.0)
         })
 
         # 2️⃣ CHRONIC HEAT STRESS (NEW: EXPOSURE-BASED)
@@ -715,7 +715,7 @@ def run_for_point(lat: float, lon: float):
         final_rows.append({
             'Hazard': 'Extreme Cold',
             'Column': col_name,
-            'Score': round(score(abs_tmin, -30.0, 5.0, inverted=True), 3)
+            'Score': score(abs_tmin, -30.0, 5.0, inverted=True)
         })
 
         # 4️⃣ CHRONIC COLD STRESS (NEW: EXPOSURE-BASED)
@@ -823,8 +823,8 @@ def run_for_point(lat: float, lon: float):
         pr_pct = ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100
         
         # FIXED TEMPERATURE ANOMALIES (climate-correct)
-        abs_tmax = obs_window['temperature_2m_max'].max()
-        abs_tmin = obs_window['temperature_2m_min'].min()
+        abs_tmax = obs_window['temperature_2m_max'].quantile(0.99)
+        abs_tmin = obs_window['temperature_2m_min'].quantile(0.01)
         tmax_anom_obs = obs_window['temperature_2m_max'].mean() - hist_tmax_mean
         tmean_anom_obs = obs_window['temperature_2m'].mean() - era5_temp_base
         tmin_shift_obs = hist_tmin_mean - obs_window['temperature_2m_min'].mean()
@@ -886,12 +886,10 @@ def run_for_point(lat: float, lon: float):
             mid = EPOCH_MIDPOINTS[ep]
             if scenario == 'Trend':
                 # Trend projection (FIXED)
-                tmax_proj = trends['max_t']['slope'] * mid + trends['max_t']['intercept']
-                tmin_proj = trends['min_t']['slope'] * mid + trends['min_t']['intercept']
+                # Trend extremes = shift observed extreme by mean warming
+                abs_tmax = obs_window['temperature_2m_max'].quantile(0.99) + tmean_anom_trend
+                abs_tmin = obs_window['temperature_2m_min'].quantile(0.01) + tmean_anom_trend
                 tmean_proj = trends['mean_t']['slope'] * mid + trends['mean_t']['intercept']
-
-                abs_tmax = tmax_proj
-                abs_tmin = tmin_proj
                 tmax_anom_trend = tmax_proj - hist_tmax_mean
                 tmean_anom_trend = tmean_proj - era5_temp_base
                 tmin_shift_trend = hist_tmin_mean - tmin_proj
@@ -915,8 +913,8 @@ def run_for_point(lat: float, lon: float):
                 cold_days = int(base_obs_days_cold * max(0.0, 1 - temp_delta / 4.0))
 
                 m = {
-                    'abs_tmax': abs_tmax,
-                    'abs_tmin': abs_tmin,
+                    abs_tmax = np.percentile(mx, 99),
+                    abs_tmin = np.percentile(mn, 1),
                     'tmax_anom': tmax_anom_trend,
                     'tmean_anom': tmean_anom_trend,
                     'tmin_shift': tmin_shift_trend,
@@ -1011,6 +1009,7 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
 
 
 
