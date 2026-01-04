@@ -98,6 +98,20 @@ def safe_to_float(val, default=0.3):
     except Exception:
         return default
 
+def count_exceedance_days(df, temp_col, threshold, mode='above'):
+    """
+    Count number of days exceeding a threshold.
+    mode='above' → temp > threshold
+    mode='below' → temp < threshold
+    """
+    if df.empty or temp_col not in df:
+        return 0
+
+    if mode == 'above':
+        return int((df[temp_col] > threshold).sum())
+    else:
+        return int((df[temp_col] < threshold).sum())
+
 def is_coastal(geom, max_dist_km=50):
     """
     Coastal if:
@@ -517,7 +531,7 @@ def get_fire_cyclone_baselines(geom):
     }).getInfo()
 
 # -------------------------------------------------------------------------
-# 5. MAIN API FUNCTION (CORRECTED TEMPERATURE HAZARDS)
+# 5. MAIN API FUNCTION (EXPOSURE-BASED CHRONIC STRESS)
 # -------------------------------------------------------------------------
 def run_for_point(lat: float, lon: float):
     try:
@@ -564,10 +578,18 @@ def run_for_point(lat: float, lon: float):
         hist_cmip['tasmin'] -= 273.15
         hist_cmip['pr'] *= 86400  # daily to mm
     
-    # ===============================
-    # CMIP6 HISTORICAL BASELINES
-    # (MODEL SPACE – for SSP risk)
-    # ===============================
+    # ==================================================
+    # ERA5 CHRONIC STRESS THRESHOLDS (EXPOSURE-BASED)
+    # ==================================================
+    era5_hist = era5[(era5['year'] >= 1980) & (era5['year'] <= 2024)]
+    era5_max_temp = era5_hist['temperature_2m_max'].max()
+    era5_min_temp = era5_hist['temperature_2m_min'].min()
+    heat_thresh = 0.75 * era5_max_temp
+    cold_thresh = 0.75 * era5_min_temp
+    
+    # ==================================================
+    # CMIP6 HISTORICAL BASELINES (MODEL SPACE – for SSP risk)
+    # ==================================================
     cmip_tmean_base = hist_cmip['tas'].mean()
     cmip_tmax_base  = hist_cmip['tasmax'].mean()
     cmip_tmin_base  = hist_cmip['tasmin'].mean()
@@ -578,6 +600,24 @@ def run_for_point(lat: float, lon: float):
             message="ERA5 returned empty dataframe"
         )
     climate_time = time.time() - climate_start
+
+    # FIXED BASELINE COMPUTATION (climate-science correct)
+    era5_base = era5[(era5['year'] >= 1980) & (era5['year'] <= 2014)]
+    era5_temp_base = era5_base['temperature_2m'].mean()
+    era5_pr_base = era5_base['pr'].mean()
+    if pd.isna(era5_pr_base) or era5_pr_base == 0:
+        era5_pr_base = 1e-6
+
+    # BASELINE TEMPERATURE STATISTICS (used for anomalies)
+    hist_tmax_mean = era5_base['temperature_2m_max'].mean()
+    hist_tmin_mean = era5_base['temperature_2m_min'].mean()
+
+    trends = {}
+    for m_name, col, func in [('max_t','temperature_2m_max','max'),('min_t','temperature_2m_min','min'),('mean_t','temperature_2m','mean'),
+                              ('pr_sum','pr','sum'),('max_pr','pr','max')]:
+        ann = era5.groupby('year')[col].agg(func).reset_index()
+        slope, icept, _, _, _ = stats.linregress(ann['year'], ann[col])
+        trends[m_name] = {'slope': slope, 'intercept': icept}
 
     # SEPARATED WRI FLOWS
     wri_start = time.time()
@@ -647,25 +687,6 @@ def run_for_point(lat: float, lon: float):
                 np.clip(15.0 / rp_years, 0.5, 4.5) * 0.2
             )
 
-    # FIXED BASELINE COMPUTATION (climate-science correct)
-    era5_base = era5[(era5['year'] >= 1980) & (era5['year'] <= 2014)]
-    era5_temp_base = era5_base['temperature_2m'].mean()
-    
-    era5_pr_base = era5_base['pr'].mean()
-    if pd.isna(era5_pr_base) or era5_pr_base == 0:
-        era5_pr_base = 1e-6
-
-    # BASELINE TEMPERATURE STATISTICS (used for anomalies)
-    hist_tmax_mean = era5_base['temperature_2m_max'].mean()
-    hist_tmin_mean = era5_base['temperature_2m_min'].mean()
-
-    trends = {}
-    for m_name, col, func in [('max_t','temperature_2m_max','max'),('min_t','temperature_2m_min','min'),('mean_t','temperature_2m','mean'),
-                              ('pr_sum','pr','sum'),('max_pr','pr','max')]:
-        ann = era5.groupby('year')[col].agg(func).reset_index()
-        slope, icept, _, _, _ = stats.linregress(ann['year'], ann[col])
-        trends[m_name] = {'slope': slope, 'intercept': icept}
-
     def add_row(col_name, metrics, year_proj=None):
         is_obs = 'Observed' in col_name
         pr_pct, t_anom = metrics.get('pr_change_pct', 0.0), metrics.get('tmean_anom', 0.0)
@@ -679,19 +700,12 @@ def run_for_point(lat: float, lon: float):
             'Score': round(score(tmax_anom, 0.5, 6.0), 3)
         })
 
-        # 2️⃣ Chronic Heat Stress (BLENDED: mean + extreme)
-        tmean_anom = metrics.get('tmean_anom', 0.0)
-        tmax_anom_val = metrics.get('tmax_anom', 0.0)
-
-        chronic_heat_signal = (
-            0.6 * tmean_anom +
-            0.4 * tmax_anom_val
-        )
-
+        # 2️⃣ CHRONIC HEAT STRESS (NEW: EXPOSURE-BASED)
+        heat_days = metrics.get('chronic_heat_days', 0)
         final_rows.append({
             'Hazard': 'Chronic Heat Stress',
             'Column': col_name,
-            'Score': round(score(chronic_heat_signal, 0.5, 4.5), 3)
+            'Score': round(score(heat_days, 10, 180), 3)
         })
 
         # 3️⃣ Extreme Cold = reduction in cold extremes
@@ -702,19 +716,12 @@ def run_for_point(lat: float, lon: float):
             'Score': round(score(tmin_shift, 0.5, 8.0), 3)
         })
 
-        # 4️⃣ Chronic Cold Stress (BLENDED: mean + extreme)
-        tmean_shift_cold = metrics.get('tmean_shift_cold', 0.0)
-        tmin_shift_val = metrics.get('tmin_shift', 0.0)
-
-        chronic_cold_signal = (
-            0.6 * tmean_shift_cold +
-            0.4 * tmin_shift_val
-        )
-
+        # 4️⃣ CHRONIC COLD STRESS (NEW: EXPOSURE-BASED)
+        cold_days = metrics.get('chronic_cold_days', 0)
         final_rows.append({
             'Hazard': 'Chronic Cold Stress',
             'Column': col_name,
-            'Score': round(score(chronic_cold_signal, 0.5, 6.0), 3)
+            'Score': round(score(cold_days, 10, 180), 3)
         })
 
         # Other climate hazards (unchanged)
@@ -798,43 +805,59 @@ def run_for_point(lat: float, lon: float):
         final_rows.append({'Hazard': 'Wildfire', 'Column': col_name, 'Score': s_wf})
         final_rows.append({'Hazard': 'Cyclone', 'Column': col_name, 'Score': s_cy})
 
-    # Execute Observed 2024 (FIXED)
+    # Execute Observed 2024 (NEW EXPOSURE LOGIC)
     obs_start = time.time()
-    obs_dec = era5[(era5['year'] >= 2015) & (era5['year'] <= 2024)]
+    obs_window = era5[(era5['year'] >= 2015) & (era5['year'] <= 2024)]
     
-    if not obs_dec.empty:
+    if not obs_window.empty:
         # Annual observed precipitation (mm/year)
-        obs_ann_pr = obs_dec['pr'].mean()
+        obs_ann_pr = obs_window['pr'].mean()
         pr_pct = ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100
         
         # FIXED TEMPERATURE ANOMALIES (climate-correct)
-        tmax_anom_obs = obs_dec['temperature_2m_max'].mean() - hist_tmax_mean
-        tmean_anom_obs = obs_dec['temperature_2m'].mean() - era5_temp_base
-        tmin_shift_obs = hist_tmin_mean - obs_dec['temperature_2m_min'].mean()
-        tmean_shift_cold_obs = era5_temp_base - obs_dec['temperature_2m'].mean()
+        tmax_anom_obs = obs_window['temperature_2m_max'].mean() - hist_tmax_mean
+        tmean_anom_obs = obs_window['temperature_2m'].mean() - era5_temp_base
+        tmin_shift_obs = hist_tmin_mean - obs_window['temperature_2m_min'].mean()
+            
+        # ---- Chronic stress exposure (Observed) ----
+        heat_days = count_exceedance_days(
+            obs_window,
+            'temperature_2m',
+            heat_thresh,
+            mode='above'
+        )
+        cold_days = count_exceedance_days(
+            obs_window,
+            'temperature_2m',
+            cold_thresh,
+            mode='below'
+        )
             
         m = {
             # FIXED TEMPERATURE HAZARDS
             'tmax_anom': tmax_anom_obs,
             'tmean_anom': tmean_anom_obs,
             'tmin_shift': tmin_shift_obs,
-            'tmean_shift_cold': tmean_shift_cold_obs,
+            
+            # NEW EXPOSURE METRICS
+            'chronic_heat_days': heat_days,
+            'chronic_cold_days': cold_days,
             
             # Legacy metrics (for continuity)
-            'tmean_anom': tmean_anom_obs,
             's_anom': score(tmean_anom_obs, 0, 4),
             'pr_change_pct': pr_pct,
             's_pr_change': (
                 score(pr_pct, 10, 50) if pr_pct > 0        # wetter → flood-relevant
                 else score(abs(pr_pct), 10, 50)            # drier → drought-relevant
             ),
-            's_max_pr': score(obs_dec['pr'].max(), 30, 500)
+            's_max_pr': score(obs_window['pr'].max(), 30, 500)
         }
     else:
         # Data unavailable
         m = {
-            'tmax_anom': np.nan, 'tmean_anom': np.nan, 'tmin_shift': np.nan, 'tmean_shift_cold': np.nan,
-            'tmean_anom': np.nan, 's_anom': np.nan, 'pr_change_pct': np.nan, 's_pr_change': np.nan, 's_max_pr': np.nan
+            'tmax_anom': np.nan, 'tmean_anom': np.nan, 'tmin_shift': np.nan,
+            'chronic_heat_days': 0, 'chronic_cold_days': 0,
+            's_anom': np.nan, 'pr_change_pct': np.nan, 's_pr_change': np.nan, 's_max_pr': np.nan
         }
 
     add_row('Observed_2024', m)
@@ -856,19 +879,30 @@ def run_for_point(lat: float, lon: float):
                 tmax_anom_trend = tmax_proj - hist_tmax_mean
                 tmean_anom_trend = tmean_proj - era5_temp_base
                 tmin_shift_trend = hist_tmin_mean - tmin_proj
-                tmean_shift_cold_trend = era5_temp_base - tmean_proj
 
                 pr_sum_proj = trends['pr_sum']['slope'] * mid + trends['pr_sum']['intercept']
                 max_pr_proj = trends['max_pr']['slope'] * mid + trends['max_pr']['intercept']
                 pr_change_pct = ((pr_sum_proj - era5_pr_base) / era5_pr_base) * 100
                 pr_change_pct = np.clip(pr_change_pct, -30, 30)
 
+                # ---- Chronic stress exposure (Trend – scaled) ----
+                base_obs_days_heat = count_exceedance_days(
+                    obs_window, 'temperature_2m', heat_thresh, 'above'
+                )
+                base_obs_days_cold = count_exceedance_days(
+                    obs_window, 'temperature_2m', cold_thresh, 'below'
+                )
+
+                temp_delta = tmean_anom_trend  # °C change vs baseline
+                heat_days = int(base_obs_days_heat * (1 + temp_delta / 4.0))
+                cold_days = int(base_obs_days_cold * max(0.0, 1 - temp_delta / 4.0))
+
                 m = {
                     'tmax_anom': tmax_anom_trend,
                     'tmean_anom': tmean_anom_trend,
                     'tmin_shift': tmin_shift_trend,
-                    'tmean_shift_cold': tmean_shift_cold_trend,
-                    'tmean_anom': tmean_anom_trend,
+                    'chronic_heat_days': heat_days,
+                    'chronic_cold_days': cold_days,
                     's_anom': score(tmean_anom_trend, 0, 5),
                     'pr_change_pct': pr_change_pct,
                     's_pr_change': score(abs(pr_change_pct), 10, 50),
@@ -908,15 +942,19 @@ def run_for_point(lat: float, lon: float):
                 tmax_anom = np.mean(mx) - cmip_tmax_base
                 tmean_anom = np.mean(av) - cmip_tmean_base
                 tmin_shift = cmip_tmin_base - np.mean(mn)
-                tmean_shift_cold = cmip_tmean_base - np.mean(av)
                 pr_change = ((np.mean(pr) - era5_pr_base) / era5_pr_base) * 100
+
+                # ---- Chronic stress exposure (SSP – proxy via annual means) ----
+                years = len(sdf)
+                heat_days = int(np.sum(av > heat_thresh) * 365 / years)
+                cold_days = int(np.sum(av < cold_thresh) * 365 / years)
 
                 m = {
                     'tmax_anom': tmax_anom,
                     'tmean_anom': tmean_anom,
                     'tmin_shift': tmin_shift,
-                    'tmean_shift_cold': tmean_shift_cold,
-                    'tmean_anom': tmean_anom, 
+                    'chronic_heat_days': heat_days,
+                    'chronic_cold_days': cold_days,
                     's_anom': score(tmean_anom, 0, 5),
                     'pr_change_pct': pr_change, 
                     's_pr_change': score(abs(pr_change), 10, 50),
