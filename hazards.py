@@ -2,115 +2,56 @@ import ee
 import pandas as pd
 import numpy as np
 import time
-import concurrent.futures
+# import concurrent.futures  # REMOVED: no longer needed
 import logging
 from scipy import stats
 from pandas.tseries.offsets import DateOffset
-import os
-import json
-import tempfile
 
-# --- 0. CONSTANTS ---
+
+# --- 0. SETUP ---
 logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 
-# EE Objects (hoisted)
-def get_dem_img():
-    return ee.Image("NASA/NASADEM_HGT/001")
 
-def get_wri_baseline_fc():
-    return ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/baseline_annual")
+EE_INITIALIZED = False
+class HazardError(Exception):
+    def __init__(self, stage: str, message: str):
+        self.stage = stage
+        self.message = message
+        super().__init__(f"[{stage}] {message}")
+        
+def safe_to_float(val, default=0.3):
+    """Convert EE results safely (handles None)"""
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except:
+        return default
 
-def get_wri_future_fc():
-    return ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/future_annual")
 
-# Hazard sensitivity constants
-WILDFIRE_TEMP_SENS = 0.16
-CYCLONE_TEMP_SENS = 0.08
+def ensure_ee_initialized():
+    global EE_INITIALIZED
+    if not EE_INITIALIZED:
+        try:
+            ee.Initialize(project='citric-snow-424111-q0')
+        except:
+            try:
+                ee.Authenticate()
+                ee.Initialize(project='citric-snow-424111-q0')
+            except Exception as e:
+                logging.error(f"EE init failed: {e}")
+                raise
+        EE_INITIALIZED = True
 
+
+# --- CONFIGURATION ---
 EPOCHS = {'2030s': (2025, 2034), '2050s': (2045, 2054), '2080s': (2075, 2084)}
 EPOCH_MIDPOINTS = {'2030s': 2030, '2050s': 2050, '2080s': 2080}
 ERA5_RANGE = ('1980-01-01', '2024-12-31')
 CMIP6_HIST_RANGE = ('1980-01-01', '2014-12-31')
 MODEL = 'MPI-ESM1-2-HR'
 
-# ================= ERROR TYPES =================
-class HazardError(Exception):
-    def __init__(self, stage: str, message: str):
-        self.stage = stage
-        self.message = message
-        super().__init__(f"[{stage}] {message}")
-
-EE_INITIALIZED = False
-
-def ensure_ee_initialized():
-    global EE_INITIALIZED
-    if EE_INITIALIZED:
-        return
-
-    try:
-        if "GCP_SERVICE_ACCOUNT" not in os.environ:
-            raise HazardError(
-                stage="EE_INIT",
-                message="GCP_SERVICE_ACCOUNT environment variable not set"
-            )
-
-        service_account_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
-
-        with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
-            json.dump(service_account_info, f)
-            key_path = f.name
-
-        try:
-            credentials = ee.ServiceAccountCredentials(
-                service_account_info["client_email"],
-                key_path
-            )
-
-            ee.Initialize(
-                credentials,
-                project=service_account_info["project_id"],
-                url="https://earthengine-highvolume.googleapis.com"
-            )
-
-            EE_INITIALIZED = True
-
-        finally:
-            os.remove(key_path)
-
-    except HazardError:
-        raise
-    except Exception as e:
-        raise HazardError(
-            stage="EE_INIT",
-            message=str(e)
-        )
-
-def safe_to_float(val, default=0.3):
-    """Safely convert values to float with fallback"""
-    if val is None:
-        return default
-    try:
-        v = float(val)
-        if np.isnan(v) or np.isinf(v):
-            return default
-        return v
-    except Exception:
-        return default
-
-def count_exceedance_days(df, temp_col, threshold, mode='above'):
-    """
-    Count number of days exceeding a threshold.
-    mode='above' → temp > threshold
-    mode='below' → temp < threshold
-    """
-    if df.empty or temp_col not in df:
-        return 0
-
-    if mode == 'above':
-        return int((df[temp_col] > threshold).sum())
-    else:
-        return int((df[temp_col] < threshold).sum())
 
 def is_coastal(geom, max_dist_km=50):
     """
@@ -119,15 +60,15 @@ def is_coastal(geom, max_dist_km=50):
     - within max_dist_km of ocean
     """
     try:
-        elev = get_dem_img().select("elevation") \
+        elev = ee.Image("NASA/NASADEM_HGT/001") \
+            .select("elevation") \
             .reduceRegion(
                 ee.Reducer.mean(),
                 geom,
                 scale=90,
                 bestEffort=True
             ).get("elevation").getInfo()
-    except Exception as e:
-        logging.exception("is_coastal elevation check failed")
+    except:
         return False
 
     if elev is None or elev > 30:
@@ -149,8 +90,9 @@ def is_coastal(geom, max_dist_km=50):
 
     return dist is not None and dist <= max_dist_km * 1000
 
+
 # -------------------------------------------------------------------------
-# 1. ULTRA-FAST ANNUAL FEATURE EXTRACTOR
+# 1. NEW: ULTRA-FAST ANNUAL FEATURE EXTRACTOR (replaces get_full_series)
 # -------------------------------------------------------------------------
 def get_annual_features(
     collection_id,
@@ -182,7 +124,7 @@ def get_annual_features(
 
             img = ee.Image(
                 ee.Algorithms.If(
-                    reducer == 'total_precipitation_sum',
+                    reducer == 'sum',
                     img.sum(),
                     img.mean()
                 )
@@ -207,53 +149,38 @@ def get_annual_features(
         df = pd.DataFrame([f['properties'] for f in features])
         df['year'] = df['year'].astype(int)
         return df
-    except Exception as e:
-        logging.exception(
-            f"get_annual_features failed | collection={collection_id} "
-            f"model={model} scenario={scenario}"
-        )
+    except:
         return pd.DataFrame()
+
 
 def score(val, min_v, max_v, inverted=False):
     if pd.isna(val): return np.nan
     n = 1 - (val - min_v) / (max_v - min_v) if inverted else (val - min_v) / (max_v - min_v)
-    return round(np.clip(n, 0.05, 0.95) * 5, 3)
+    return round(np.clip(n, 0, 1) * 5, 3)
+
 
 def perform_qm(train_df, hist_df, fut_df, t_col, h_col, f_col):
-    """
-    Annual quantile mapping (NO monthly logic).
-    Correct for annual-mean / annual-extreme climate data.
-    """
-    if train_df.empty or hist_df.empty or fut_df.empty:
-        return fut_df[f_col].values
-
-    # Observed (ERA5) reference distribution
-    obs = np.sort(train_df[t_col].values)
-
-    # Historical model distribution
-    hist = np.sort(hist_df[h_col].values)
-    
-    # Guard against zero variance
-    if np.std(hist) < 1e-6:
-        return fut_df[f_col].values
-
-    # Future model values
-    fut = fut_df[f_col].values
-
-    # Percentile rank of future values in historical model space
-    ranks = np.searchsorted(hist, fut) / len(hist)
-
-    # Map those ranks onto observed distribution
-    corrected = np.quantile(obs, np.clip(ranks, 0, 0.9999))
-
+    if train_df.empty or hist_df.empty or fut_df.empty: return fut_df[f_col].values
+    obs_vals = train_df[t_col].values; obs_months = train_df['year'] % 12 + 1  # approximate
+    hist_vals = hist_df[h_col].values; hist_months = hist_df['year'] % 12 + 1
+    fut_vals = fut_df[f_col].values; fut_months = fut_df['year'] % 12 + 1
+    corrected = np.zeros(len(fut_vals))
+    for m in range(1, 13):
+        o_m = obs_vals[obs_months == m]; h_m = hist_vals[hist_months == m]
+        f_idx = (fut_months == m); f_m = fut_vals[f_idx]
+        if len(o_m) == 0 or len(h_m) == 0 or len(f_m) == 0: corrected[f_idx] = f_m; continue
+        ranks = np.searchsorted(h_m, f_m) / len(h_m)
+        corrected[f_idx] = np.quantile(o_m, np.clip(ranks, 0, 0.9999))
     return corrected
 
+
 # -------------------------------------------------------------------------
-# 2. IPCC SEA LEVEL RISE MULTIPLIER
+# 2. 🌊 IPCC SEA LEVEL RISE MULTIPLIER
 # -------------------------------------------------------------------------
 def get_ipcc_slr_multiplier(year, scenario, geom):
     try:
-        local_elev = get_dem_img().select('elevation').reduceRegion(
+        elevation_img = ee.Image("NASA/NASADEM_HGT/001").select('elevation')
+        local_elev = elevation_img.reduceRegion(
             reducer=ee.Reducer.mean(),
             geometry=geom,
             scale=30,
@@ -273,8 +200,9 @@ def get_ipcc_slr_multiplier(year, scenario, geom):
     epoch = min(slr_factors[scenario].keys(), key=lambda x: abs(x - year))
     return slr_factors[scenario][epoch]
 
+
 # -------------------------------------------------------------------------
-# 3. STRICT FUTURE WRI EXTRACTOR (NO FALLBACK)
+# 3. 🚀 SERIAL WRI SAMPLING (ThreadPoolExecutor REMOVED)
 # -------------------------------------------------------------------------
 def safe_float(props, key):
     v = props.get(key)
@@ -286,61 +214,14 @@ def safe_float(props, key):
         return np.nan
     return float(np.clip(v, 0.0, 5.0))
 
-def extract_wri_future_strict(geom, geom_coords):
-    """
-    Strict extraction of Aqueduct V4 future_annual values.
-    No fallback. No baseline overwrite. Dataset truth only.
-    """
-    try:
-        lon, lat = geom_coords
-        pt = ee.Geometry.Point([lon, lat])
 
-        # Find nearest polygon ONCE
-        nearest = (
-            get_wri_future_fc()
-            .map(lambda f: f.set('distance', ee.Feature(pt).distance(f.geometry())))
-            .sort('distance')
-            .first()
-            .getInfo()
-        )
-
-        if not nearest:
-            return {}
-
-        props = nearest['properties']
-        future = {}
-
-        for scenario in ['Trend', 'ssp245', 'ssp585']:
-            pref = (
-                'pes' if scenario == 'ssp585'
-                else 'opt' if scenario == 'ssp245'
-                else 'bau'
-            )
-
-            for ep, mid in EPOCH_MIDPOINTS.items():
-                y_key = '30' if mid == 2030 else '50' if mid == 2050 else '80'
-                col = f'{scenario}_{ep}'
-
-                future[col] = {
-                    'Water Stress': safe_float(props, f'{pref}{y_key}_ws_x_s'),
-                    'Seasonal Variability': safe_float(props, f'{pref}{y_key}_sv_x_s'),
-                    'Interannual Variability': safe_float(props, f'{pref}{y_key}_iv_x_s'),
-                    'Drought Risk': None  # Future dataset doesn't provide this
-                }
-
-        return future
-    except Exception as e:
-        logging.exception("extract_wri_future_strict failed")
-        return {}
-
-# -------------------------------------------------------------------------
-# 4. OBSERVED WRI BASELINE
-# -------------------------------------------------------------------------
 WRI_SYSTEM_KEYS = ['Water Stress', 'Seasonal Variability', 'Interannual Variability']
 WRI_EVENT_KEYS  = ['Drought Risk', 'Riverine Flood Risk', 'Coastal Flood Risk']
 
+
 def system_metrics_invalid(result):
     return any(pd.isna(result.get(k)) for k in WRI_SYSTEM_KEYS)
+
 
 def sample_nearest_wri(coll, point, use_baseline_bau30, year=None, scenario_name=None):
     try:
@@ -370,18 +251,18 @@ def sample_nearest_wri(coll, point, use_baseline_bau30, year=None, scenario_name
                 'Interannual Variability': safe_float(props, f'{pref}{y_key}_iv_x_s'),
                 'Drought Risk': None
             }
-    except Exception as e:
-        logging.exception("sample_nearest_wri failed")
+    except:
         return None
 
-def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=None, use_baseline_bau30=False):
+
+def get_wri_4_directions_parallel(geom, year=None, scenario_name=None, use_baseline_bau30=False):
     start_time = time.time()
-    lon, lat = geom_coords
+    lon, lat = geom.coordinates().getInfo()
 
     if use_baseline_bau30:
-        coll = get_wri_baseline_fc()
+        coll = ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/baseline_annual")
     else:
-        coll = get_wri_future_fc()
+        coll = ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/future_annual")
 
     center_start = time.time()
     center_pt = ee.Geometry.Point([lon, lat])
@@ -391,8 +272,9 @@ def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=No
     system_locked = False
     if use_baseline_bau30 and center_result and system_metrics_invalid(center_result):
         try:
+            bau_coll = ee.FeatureCollection("WRI/Aqueduct_Water_Risk/V4/future_annual")
             bau_2030 = sample_nearest_wri(
-                get_wri_future_fc(),
+                bau_coll,
                 center_pt,
                 use_baseline_bau30=False,
                 year=2030,
@@ -409,16 +291,9 @@ def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=No
         if center_result and '_system_fallback' in center_result:
             system_locked = True
 
-    # Safer WRI validation (require 2+ valid events)
-    valid_events = [
-        k for k in WRI_EVENT_KEYS
-        if not pd.isna(center_result.get(k))
-    ]
-
-    if center_result and len(valid_events) >= 2:
+    if center_result and sum(not pd.isna(center_result.get(k)) for k in WRI_EVENT_KEYS) >= 1:
         center_result['_source'] = 'CENTER'
         total_time = time.time() - start_time
-        center_result['_method'] = 'CENTER'
         return center_result, {
             'method': 'CENTER',
             'total_time': total_time
@@ -439,7 +314,7 @@ def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=No
         all_points[f'{radius//1000}km_S'] = ee.Geometry.Point([lon, lat - delta_lat])
         all_points[f'{radius//1000}km_W'] = ee.Geometry.Point([lon - delta_lon, lat])
 
-    # SERIAL: Process all directions
+    # ✅ SERIAL: REMOVED ThreadPoolExecutor
     all_results = {}
     for name, pt in all_points.items():
         result = sample_nearest_wri(
@@ -452,7 +327,7 @@ def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=No
 
     if not all_results:
         total_time = time.time() - start_time
-        return {k: None for k in ['Water Stress', 'Drought Risk', 'Seasonal Variability',
+        return {k: 1.0 for k in ['Water Stress', 'Drought Risk', 'Seasonal Variability',
                                  'Interannual Variability', 'Riverine Flood Risk', 'Coastal Flood Risk']}, {'method': 'FAILED', 'total_time': total_time}
 
     valid_candidates = []
@@ -472,7 +347,6 @@ def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=No
 
         radius_used, name_used = valid_candidates[0][0], valid_candidates[0][2]
         total_time = time.time() - start_time
-        nearest['_method'] = f'PARALLEL_{radius_used}km'
         nearest['_source'] = f'PARALLEL_{radius_used}km'
         return nearest, {
             'method': f'PARALLEL_{radius_used}km',
@@ -484,6 +358,36 @@ def get_wri_4_directions_parallel(geom, geom_coords, year=None, scenario_name=No
     total_time = time.time() - start_time
     return {k: 1.0 for k in ['Water Stress', 'Drought Risk', 'Seasonal Variability',
                              'Interannual Variability', 'Riverine Flood Risk', 'Coastal Flood Risk']}, {'method': 'NO_VALID', 'total_time': total_time}
+
+
+def get_all_wri_parallel(geom):
+    total_start = time.time()
+
+    wri_configs = []
+    wri_configs.append(('baseline', None, None, True))
+
+    for scenario in ['Trend', 'ssp245', 'ssp585']:
+        for ep, mid in EPOCH_MIDPOINTS.items():
+            scenario_name = f'{scenario}_{ep}'
+            wri_configs.append((scenario_name, mid, scenario_name, False))
+
+    all_wri_results = {}
+    timings = {}
+
+    # ✅ SERIAL: REMOVED ThreadPoolExecutor
+    for config in wri_configs:
+        scenario_name, year, scen_name, is_base = config
+
+        result, timing_info = get_wri_4_directions_parallel(
+            geom, year, scen_name, is_base
+        )
+
+        result['_method'] = timing_info['method']
+        all_wri_results[scenario_name] = result
+        timings[scenario_name] = timing_info
+
+    return all_wri_results, timings
+
 
 def get_fire_cyclone_baselines(geom):
     landsat = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2") \
@@ -509,6 +413,8 @@ def get_fire_cyclone_baselines(geom):
         .filterBounds(geom) \
         .filter(ee.Filter.gte('SEASON', 1990))
 
+    storm_count = tracks.distinct('SID').size()
+
     def clean_wind(f):
         wind_cols = [
             'WMO_WIND', 'USA_WIND', 'TOKYO_WIND',
@@ -526,12 +432,13 @@ def get_fire_cyclone_baselines(geom):
     return ee.Dictionary({
         'NDVI': ndvi_val,
         'wf_count': wf_count,
-        'storm_count': tracks.distinct('SID').size(),
+        'storm_count': storm_count,
         'max_wind_knots': max_wind
     }).getInfo()
 
+
 # -------------------------------------------------------------------------
-# 5. MAIN API FUNCTION (EXPOSURE-BASED CHRONIC STRESS)
+# 4. MAIN API FUNCTION (UPDATED)
 # -------------------------------------------------------------------------
 def run_for_point(lat: float, lon: float):
     try:
@@ -543,17 +450,12 @@ def run_for_point(lat: float, lon: float):
     final_rows = []
     WRI_WATER_HAZARDS = ['Water Stress', 'Drought Risk', 'Seasonal Variability', 'Interannual Variability']
 
-    logging.info(
-        "Processing point",
-        extra={"lat": round(lat, 4), "lon": round(lon, 4)}
-    )
-    
+    print(f"🌍 Processing ({lat:.4f}, {lon:.4f})...")
     geom = ee.Geometry.Point([lon, lat])
-    geom_coords = (lon, lat)  # Cache coordinates
     
     coastal_flag = is_coastal(geom)
     
-    # ULTRA-FAST ERA5 + HISTORICAL (annual aggregation in EE)
+    # ✅ NEW: ULTRA-FAST ERA5 + HISTORICAL (annual aggregation in EE)
     climate_start = time.time()
     era5 = get_annual_features(
         "ECMWF/ERA5_LAND/DAILY_AGGR",
@@ -578,22 +480,6 @@ def run_for_point(lat: float, lon: float):
         hist_cmip['tasmin'] -= 273.15
         hist_cmip['pr'] *= 86400  # daily to mm
     
-    # ==================================================
-    # ERA5 CHRONIC STRESS THRESHOLDS (EXPOSURE-BASED)
-    # ==================================================
-    era5_hist = era5[(era5['year'] >= 1980) & (era5['year'] <= 2024)]
-    era5_max_temp = era5_hist['temperature_2m_max'].max()
-    era5_min_temp = era5_hist['temperature_2m_min'].min()
-    heat_thresh = 0.75 * era5_max_temp
-    cold_thresh = 0.75 * era5_min_temp
-    
-    # ==================================================
-    # CMIP6 HISTORICAL BASELINES (MODEL SPACE – for SSP risk)
-    # ==================================================
-    cmip_tmean_base = hist_cmip['tas'].mean()
-    cmip_tmax_base  = hist_cmip['tasmax'].mean()
-    cmip_tmin_base  = hist_cmip['tasmin'].mean()
-    
     if era5.empty:
         raise HazardError(
             stage="ERA5_FETCH",
@@ -601,41 +487,18 @@ def run_for_point(lat: float, lon: float):
         )
     climate_time = time.time() - climate_start
 
-    # FIXED BASELINE COMPUTATION (climate-science correct)
-    era5_base = era5[(era5['year'] >= 1980) & (era5['year'] <= 2014)]
-    era5_temp_base = era5_base['temperature_2m'].mean()
-    era5_pr_base = era5_base['pr'].mean()
-    if pd.isna(era5_pr_base) or era5_pr_base == 0:
-        era5_pr_base = 1e-6
-
-    # BASELINE TEMPERATURE STATISTICS (used for anomalies)
-    hist_tmax_mean = era5_base['temperature_2m_max'].mean()
-    hist_tmin_mean = era5_base['temperature_2m_min'].mean()
-
-    trends = {}
-    for m_name, col, func in [('max_t','temperature_2m_max','max'),('min_t','temperature_2m_min','min'),('mean_t','temperature_2m','mean'),
-                              ('pr_sum','pr','sum'),('max_pr','pr','max')]:
-        ann = era5.groupby('year')[col].agg(func).reset_index()
-        slope, icept, _, _, _ = stats.linregress(ann['year'], ann[col])
-        trends[m_name] = {'slope': slope, 'intercept': icept}
-
-    # SEPARATED WRI FLOWS
+    # ULTRA-PARALLEL: ALL 10 WRI scenarios at once
     wri_start = time.time()
+    all_wri, wri_timings = get_all_wri_parallel(geom)
     
-    # 1️⃣ OBSERVED BASELINE ONLY
-    wri_base, _ = get_wri_4_directions_parallel(
-        geom, geom_coords, use_baseline_bau30=True
-    )
-    
-    if not wri_base:
+    if 'baseline' not in all_wri or not all_wri['baseline']:
         raise HazardError(
             stage="WRI_FETCH",
             message="WRI baseline returned no data"
         )
         
-    # 2️⃣ STRICT FUTURE ONLY (no fallback)
-    wri_future = extract_wri_future_strict(geom, geom_coords)
-    
+    wri_base = all_wri['baseline']
+
     drr_base_score = wri_base.get('Drought Risk', np.nan)
     baseline_method = wri_base.get('_method', 'UNKNOWN')
     wri_time = time.time() - wri_start
@@ -671,81 +534,59 @@ def run_for_point(lat: float, lon: float):
     fuel_mult = np.clip(ndvi / 0.3, 0.5, 1.5)
     wf_base = np.clip((wf_count / 100) * 5, 0.5, 5.0) * fuel_mult
     
-    # CYCLONE BASELINE (STRICTLY COASTAL)
+    # --- CYCLONE BASELINE (STRICTLY COASTAL) ---
     if not coastal_flag:
-        cy_base = 0.0
+        cy_base = 0.0   # IMPORTANT: zero, not NaN
     else:
         if storm_count is None or pd.isna(storm_count) or storm_count < 1:
-            cy_base = 0.5
+            cy_base = 0.5   # minimal residual coastal risk
         else:
             cy_wind_kmh = max_wind_knots * 1.852
-            rp_years = np.clip(34 / max(1, storm_count), 5, 100)
-            damage_potential = (cy_wind_kmh / 180.0) ** 3
-
+            rp_years = max(5, 34 / storm_count)   # avoid explosive return periods
+    
+            damage_potential = (cy_wind_kmh / 180.0) ** 3   # higher normalization
+    
             cy_base = (
                 np.clip(damage_potential * 5.0, 0.5, 4.5) * 0.8 +
                 np.clip(15.0 / rp_years, 0.5, 4.5) * 0.2
             )
+    
+    # ERA5 processing (now annual data)
+    era5_base = era5[(era5['year'] >= 1980) & (era5['year'] <= 2014)]
+    era5_temp_base = era5_base['temperature_2m'].mean()
+    
+    era5_pr_base = era5_base['pr'].mean()
+    if pd.isna(era5_pr_base) or era5_pr_base == 0:
+        era5_pr_base = 1e-6
+
+    hist_tmax = era5_base['temperature_2m_max']
+    hist_tmin = era5_base['temperature_2m_min']
+
+    heat_threshold = hist_tmax.quantile(0.95)
+    cold_threshold = hist_tmin.quantile(0.05)
+
+    trends = {}
+    for m_name, col, func in [('max_t','temperature_2m_max','max'),('min_t','temperature_2m_min','min'),('mean_t','temperature_2m','mean'),
+                              ('pr_sum','pr','sum'),('max_pr','pr','max')]:
+        ann = era5.groupby('year')[col].agg(func).reset_index()
+        slope, icept, _, _, _ = stats.linregress(ann['year'], ann[col])
+        trends[m_name] = {'slope': slope, 'intercept': icept}
 
     def add_row(col_name, metrics, year_proj=None):
         is_obs = 'Observed' in col_name
-        pr_pct, t_anom = metrics.get('pr_change_pct', 0.0), metrics.get('tmean_anom', 0.0)
+        pr_pct, t_anom = metrics.get('pr_change_pct', 0.0), metrics.get('anom', 0.0)
 
-        # FIXED TEMPERATURE HAZARDS (annual-data correct)
-        # 1️⃣ Extreme Heat = anomaly of annual maximum temperature
-        abs_tmax = metrics.get('abs_tmax', np.nan)
-        
-        final_rows.append({
-            'Hazard': 'Extreme Heat',
-            'Column': col_name,
-            'Score': score(abs_tmax, 30.0, 50.0)
-        })
+        for h, s in [('Extreme Heat', metrics['s_max_t']), ('Chronic Heat Stress', metrics['s_days_35']),
+                     ('Extreme Cold', metrics['s_min_t']), ('Chronic Cold Stress', metrics['s_days_0']),
+                     ('Temperature Anomaly', metrics['s_anom']), ('Precipitation Change', metrics['s_pr_change']),
+                     ('Extreme Precipitation', metrics['s_max_pr'])]:
+            final_rows.append({'Hazard': h, 'Column': col_name, 'Score': round(s, 3)})
 
-        # 2️⃣ CHRONIC HEAT STRESS (NEW: EXPOSURE-BASED)
-        heat_days = metrics.get('chronic_heat_days', 0)
-        final_rows.append({
-            'Hazard': 'Chronic Heat Stress',
-            'Column': col_name,
-            'Score': round(score(heat_days, 10, 180), 3)
-        })
+        scenario_key = 'baseline' if is_obs else col_name
+        wri_scenario = all_wri.get(scenario_key, wri_base)
 
-        # 3️⃣ Extreme Cold = reduction in cold extremes
-        abs_tmin = metrics.get('abs_tmin', np.nan)
-        
-        final_rows.append({
-            'Hazard': 'Extreme Cold',
-            'Column': col_name,
-            'Score': score(abs_tmin, -30.0, 5.0, inverted=True)
-        })
-
-        # 4️⃣ CHRONIC COLD STRESS (NEW: EXPOSURE-BASED)
-        cold_days = metrics.get('chronic_cold_days', 0)
-        final_rows.append({
-            'Hazard': 'Chronic Cold Stress',
-            'Column': col_name,
-            'Score': round(score(cold_days, 10, 180), 3)
-        })
-
-        # Other climate hazards (unchanged)
-        final_rows.append({'Hazard': 'Temperature Anomaly', 'Column': col_name, 'Score': round(metrics['s_anom'], 3)})
-        final_rows.append({'Hazard': 'Precipitation Change', 'Column': col_name, 'Score': round(metrics['s_pr_change'], 3)})
-        abs_pr_max = metrics.get('abs_pr_max', np.nan)
-
-        final_rows.append({
-            'Hazard': 'Extreme Precipitation',
-            'Column': col_name,
-            'Score': round(score(abs_pr_max, 20.0, 350.0), 3)
-        })
-
-        # CLEAN WRI SEPARATION
-        if is_obs:
-            wri_vals = wri_base
-        else:
-            wri_vals = wri_future.get(col_name, {})
-
-        # WRI Water Hazards
         for h in WRI_WATER_HAZARDS:
-            # Drought Risk (special handling)
+            # --- Drought Risk ---
             if h == 'Drought Risk':
                 if pd.isna(drr_base_score):
                     s = None
@@ -757,9 +598,14 @@ def run_for_point(lat: float, lon: float):
                         (1 - pr_pct / 100) + (t_anom / 4.0)
                     )
                     s = min(5.0, drr_base_score * drought_mult)
-            # Other WRI hazards (direct lookup)
+            # --- Other WRI hazards ---
             else:
-                s = wri_vals.get(h)
+                base_s = wri_base.get(h)
+                if is_obs:
+                    s = base_s if not pd.isna(base_s) else np.nan
+                else:
+                    fut_s = wri_scenario.get(h, base_s)
+                    s = fut_s if not pd.isna(fut_s) else base_s
 
             final_rows.append({
                 'Hazard': h,
@@ -767,7 +613,7 @@ def run_for_point(lat: float, lon: float):
                 'Score': s
             })
 
-        # Riverine Flood Risk (always applicable)
+        # --- Riverine Flood Risk (always applicable) ---
         if pd.isna(rfr_base):
             riverine_s = np.nan
         elif is_obs:
@@ -778,7 +624,7 @@ def run_for_point(lat: float, lon: float):
                 rfr_base * max(0.8, 1 + (pr_pct / 100))
             )
 
-        # Coastal Flood Risk (ONLY if coastal)
+        # --- Coastal Flood Risk (ONLY if coastal) ---
         if not coastal_flag:
             coastal_s = np.nan
         else:
@@ -791,21 +637,23 @@ def run_for_point(lat: float, lon: float):
                 if pd.isna(cfr_base) or slr_mult is None:
                     coastal_s = np.nan
                 else:
-                    coastal_s = min(5.0, cfr_base + (slr_mult - 1.0))
-                    
+                    coastal_s = min(5.0, cfr_base * slr_mult)
+
         final_rows.append({'Hazard': 'Riverine Flood Risk', 'Column': col_name, 'Score': round(riverine_s, 3)})
         final_rows.append({'Hazard': 'Coastal Flood Risk', 'Column': col_name, 'Score': round(coastal_s, 3)})
 
-        # Fire & Cyclone
         if is_obs:
             s_wf = wf_base
             s_cy = cy_base
         else:
-            s_wf = wf_base * (1 + min(1.5, t_anom) * WILDFIRE_TEMP_SENS)
+            wf_sens = 0.16
+            cy_sens = 0.08
+
+            s_wf = wf_base * (1 + t_anom * wf_sens)
             if cy_base == 0.0:
                 s_cy = 0.0
             else:
-                s_cy = min(5.0, cy_base * (1 + t_anom * CYCLONE_TEMP_SENS * 0.5))
+                s_cy = cy_base * (1 + t_anom * cy_sens)
 
         s_wf = round(min(5.0, s_wf), 3)
         s_cy = round(min(5.0, s_cy), 3)
@@ -813,71 +661,54 @@ def run_for_point(lat: float, lon: float):
         final_rows.append({'Hazard': 'Wildfire', 'Column': col_name, 'Score': s_wf})
         final_rows.append({'Hazard': 'Cyclone', 'Column': col_name, 'Score': s_cy})
 
-    # Execute Observed 2024 (NEW EXPOSURE LOGIC)
+    # Execute Observed 2024
     obs_start = time.time()
-    obs_window = era5[(era5['year'] >= 2015) & (era5['year'] <= 2024)]
+    obs_dec = era5[(era5['year'] >= 2015) & (era5['year'] <= 2024)]
     
-    if not obs_window.empty:
+    if not obs_dec.empty:
         # Annual observed precipitation (mm/year)
-        obs_ann_pr = obs_window['pr'].mean()
-        pr_pct = ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100
+        obs_ann_pr = obs_dec['pr'].mean()
         
-        # FIXED TEMPERATURE ANOMALIES (climate-correct)
-        abs_tmax = obs_window['temperature_2m_max'].quantile(0.99)
-        abs_tmin = obs_window['temperature_2m_min'].quantile(0.01)
-        tmax_anom_obs = obs_window['temperature_2m_max'].mean() - hist_tmax_mean
-        tmean_anom_obs = obs_window['temperature_2m'].mean() - era5_temp_base
-        tmin_shift_obs = hist_tmin_mean - obs_window['temperature_2m_min'].mean()
-        abs_pr_max = obs_window['pr'].max()
+        # Heat / cold day counts (approximated from annual max/min)
+        dec_heat = (obs_dec['temperature_2m_max'] > heat_threshold).sum() * 36.5  # ~days/year
+        dec_cold = (obs_dec['temperature_2m_min'] < cold_threshold).sum() * 36.5
         
-        # ---- Chronic stress exposure (Observed) ----
-        heat_days = count_exceedance_days(
-            obs_window,
-            'temperature_2m',
-            heat_thresh,
-            mode='above'
-        )
-        cold_days = count_exceedance_days(
-            obs_window,
-            'temperature_2m',
-            cold_thresh,
-            mode='below'
-        )
-            
+        # Temperature anomaly (raw, °C)
+        t_anom_obs = obs_dec['temperature_2m'].mean() - era5_temp_base
+        
         m = {
-            # FIXED TEMPERATURE HAZARDS
-            'abs_tmax': abs_tmax,
-            'abs_tmin': abs_tmin,
-            'tmax_anom': tmax_anom_obs,
-            'tmean_anom': tmean_anom_obs,
-            'tmin_shift': tmin_shift_obs,
+            # --- Temperature extremes ---
+            's_max_t': score(obs_dec['temperature_2m_max'].max(), 30, 50),
             
-            # NEW EXPOSURE METRICS
-            'chronic_heat_days': heat_days,
-            'chronic_cold_days': cold_days,
+            # Approx annualized intensity from decade counts
+            's_days_35': score(dec_heat / 10, 5, 150),
+            's_min_t': score(obs_dec['temperature_2m_min'].min(), -30, 5, inverted=True),
+            's_days_0': score(dec_cold / 10, 1, 90),
             
-            # Legacy metrics (for continuity)
-            's_anom': score(tmean_anom_obs, 0, 4),
-            'pr_change_pct': pr_pct,
-            's_pr_change': (
-                score(pr_pct, 10, 50) if pr_pct > 0        # wetter → flood-relevant
-                else score(abs(pr_pct), 10, 50)            # drier → drought-relevant
+            # --- Temperature anomaly ---
+            'anom': t_anom_obs,
+            's_anom': score(t_anom_obs, 0, 4),
+            
+            # --- Precipitation change (annual mean vs baseline) ---
+            'pr_change_pct': ((obs_ann_pr - era5_pr_base) / era5_pr_base) * 100,
+            's_pr_change': score(
+                abs((obs_ann_pr - era5_pr_base) / era5_pr_base * 100),
+                10, 50
             ),
-            'abs_pr_max': abs_pr_max,
-            's_max_pr': score(abs_pr_max, 30, 350)
+            
+            # --- Extreme precipitation (annual max) ---
+            's_max_pr': score(obs_dec['pr'].max(), 30, 500)
         }
     else:
-        # Data unavailable
         m = {
-            'tmax_anom': np.nan, 'tmean_anom': np.nan, 'tmin_shift': np.nan,
-            'chronic_heat_days': 0, 'chronic_cold_days': 0,
-            's_anom': np.nan, 'pr_change_pct': np.nan, 's_pr_change': np.nan, 's_max_pr': np.nan
+            's_max_t': 1.0, 's_days_35': 1.0, 's_min_t': 1.0, 's_days_0': 1.0,
+            's_anom': 0.0, 'pr_change_pct': 0.0, 's_pr_change': 0.0, 's_max_pr': 1.0
         }
 
     add_row('Observed_2024', m)
     obs_time = time.time() - obs_start
 
-    # Execute scenarios - Annual CMIP6 epoch data only
+    # Execute scenarios - NEW: Annual CMIP6 epoch data only
     scenarios_start = time.time()
     cmip_cache = {}  # key = (scenario, epoch)
     
@@ -885,54 +716,34 @@ def run_for_point(lat: float, lon: float):
         for ep, (sy, ey) in EPOCHS.items():
             mid = EPOCH_MIDPOINTS[ep]
             if scenario == 'Trend':
-                tmean_proj = trends['mean_t']['slope'] * mid + trends['mean_t']['intercept']
-                tmean_anom_trend = tmean_proj - era5_temp_base
-                
-                abs_tmax = obs_window['temperature_2m_max'].quantile(0.99) + tmean_anom_trend
-                abs_tmin = obs_window['temperature_2m_min'].quantile(0.01) + tmean_anom_trend
-                
-                tmax_proj = trends['max_t']['slope'] * mid + trends['max_t']['intercept']
-                tmin_proj = trends['min_t']['slope'] * mid + trends['min_t']['intercept']
-                
-                tmax_anom_trend = tmax_proj - hist_tmax_mean
-                tmin_shift_trend = hist_tmin_mean - tmin_proj
-                
+                t_mean = trends['mean_t']['slope'] * mid + trends['mean_t']['intercept']
+                heat_shift = (trends['max_t']['slope'] * mid + trends['max_t']['intercept']) - heat_threshold
+                cold_shift = cold_threshold - (trends['min_t']['slope'] * mid + trends['min_t']['intercept'])
+
+                dec_heat = max(0, 0.02 * 365 * (1 + heat_shift / 2.0))
+                dec_cold = max(0, 0.02 * 365 * (1 + cold_shift / 2.0))
+
+                min_t_proj = (trends['min_t']['slope'] * mid + trends['min_t']['intercept'])
                 pr_sum_proj = trends['pr_sum']['slope'] * mid + trends['pr_sum']['intercept']
-                abs_pr_max = trends['max_pr']['slope'] * mid + trends['max_pr']['intercept']
-                
+                max_pr_proj = trends['max_pr']['slope'] * mid + trends['max_pr']['intercept']
                 pr_change_pct = ((pr_sum_proj - era5_pr_base) / era5_pr_base) * 100
                 pr_change_pct = np.clip(pr_change_pct, -30, 30)
-                
-                base_obs_days_heat = count_exceedance_days(
-                    obs_window, 'temperature_2m_max', heat_thresh, 'above'
-                )
-                base_obs_days_cold = count_exceedance_days(
-                    obs_window, 'temperature_2m_min', cold_thresh, 'below'
-                )
-                
-                heat_days = int(
-                    base_obs_days_heat * np.clip(1 + 0.15 * tmean_anom_trend, 0.7, 2.5)
-                )
-                cold_days = int(
-                    base_obs_days_cold * np.clip(1 - 0.20 * tmean_anom_trend, 0.0, 1.0)
-                )
-                
-                m = {
-                    'abs_tmax': abs_tmax,
-                    'abs_tmin': abs_tmin,
-                    'tmax_anom': tmax_anom_trend,
-                    'tmean_anom': tmean_anom_trend,
-                    'tmin_shift': tmin_shift_trend,
-                    'chronic_heat_days': heat_days,
-                    'chronic_cold_days': cold_days,
-                    's_anom': score(tmean_anom_trend, 0, 5),
-                    'pr_change_pct': pr_change_pct,
-                    's_pr_change': score(abs(pr_change_pct), 10, 50),
-                    'abs_pr_max': abs_pr_max,
-                }
 
+                dec_heat = max(dec_heat * 10, 0)
+                dec_cold = max(dec_cold * 10, 0)
+                m = {
+                        's_max_t': score(trends['max_t']['slope'] * mid + trends['max_t']['intercept'], 30, 50),
+                        's_min_t': score(min_t_proj, -30, 5, inverted=True),
+                        's_days_35': score(dec_heat / 10, 5, 150),
+                        's_days_0': score(dec_cold / 10, 1, 90),
+                        'anom': t_mean - era5_temp_base,
+                        's_anom': score(t_mean - era5_temp_base, 0, 5),
+                        'pr_change_pct': pr_change_pct,
+                        's_pr_change': score(abs(pr_change_pct), 10, 50),
+                        's_max_pr': score(max_pr_proj, 30, 500)
+                    }
             else:
-                # Annual epoch data only (10 years)
+                # ✅ NEW: Annual epoch data only (10 years)
                 cache_key = (scenario, ep)
                 if cache_key not in cmip_cache:
                     df_future = get_annual_features(
@@ -953,48 +764,22 @@ def run_for_point(lat: float, lon: float):
                 sdf = cmip_cache[cache_key]
                 if sdf.empty: continue
                 
-                # --- SSP TEMPERATURE: USE RAW CMIP6 (NO QM) ---
-                mx = sdf['tasmax'].values
-                mn = sdf['tasmin'].values
-                av = sdf['tas'].values
-                # Mean warming signal (robust)
-                tmean_anom = np.mean(av) - cmip_tmean_base
-                # Hybrid SSP extremes
-                abs_tmax = obs_extreme_tmax + tmean_anom
-                abs_tmin = obs_extreme_tmin + tmean_anom
-
-                # Observed extreme reference (structure preserved)
-                obs_extreme_tmax = obs_window['temperature_2m_max'].quantile(0.99)
-                obs_extreme_tmin = obs_window['temperature_2m_min'].quantile(0.01)
-                # --- Precipitation remains bias-corrected ---
+                mx = perform_qm(era5_base, hist_cmip, sdf, 'temperature_2m_max', 'tasmax', 'tasmax')
+                mn = perform_qm(era5_base, hist_cmip, sdf, 'temperature_2m_min', 'tasmin', 'tasmin')
+                av = perform_qm(era5_base, hist_cmip, sdf, 'temperature_2m', 'tas', 'tas')
                 pr = perform_qm(era5_base, hist_cmip, sdf, 'pr', 'pr', 'pr')
-                abs_pr_max = np.max(pr)
-
-                # --- SSP TEMPERATURE ANOMALIES (MODEL SPACE) ---
-                tmax_anom = np.mean(mx) - cmip_tmax_base
-                tmean_anom = np.mean(av) - cmip_tmean_base
-                tmin_shift = cmip_tmin_base - np.mean(mn)
+                t_anom = np.mean(av) - era5_temp_base
                 pr_change = ((np.mean(pr) - era5_pr_base) / era5_pr_base) * 100
+                dec_heat = np.sum(mx > heat_threshold) * 36.5
+                dec_cold = np.sum(mn < cold_threshold) * 36.5
 
-                # ---- Chronic stress exposure (SSP – proxy via annual means) ----
-                years = len(sdf)
-                heat_days = int(np.sum(av > heat_thresh) * 365 / years)
-                cold_days = int(np.sum(av < cold_thresh) * 365 / years)
-
-                m = {
-                    'abs_tmax': abs_tmax,
-                    'abs_tmin': abs_tmin,
-                    'tmax_anom': tmax_anom,
-                    'tmean_anom': tmean_anom,
-                    'tmin_shift': tmin_shift,
-                    'chronic_heat_days': heat_days,
-                    'chronic_cold_days': cold_days,
-                    's_anom': score(tmean_anom, 0, 5),
-                    'pr_change_pct': pr_change, 
-                    's_pr_change': score(abs(pr_change), 10, 50),
-                    'abs_pr_max': abs_pr_max,
-                    's_max_pr': score(np.max(pr), 30, 500)
-                }
+                m = {'s_max_t': score(np.max(mx), 30, 50),
+                     's_min_t': score(np.min(mn), -30, 5, True),
+                     's_days_35': score(dec_heat / 10, 5, 150),
+                     's_days_0': score(dec_cold / 10, 1, 90),
+                     'anom': t_anom, 's_anom': score(t_anom, 0, 5),
+                     'pr_change_pct': pr_change, 's_pr_change': score(abs(pr_change), 10, 50),
+                     's_max_pr': score(np.max(pr), 30, 500)}
             add_row(f'{scenario}_{ep}', m, year_proj=mid)
     scenarios_time = time.time() - scenarios_start
 
@@ -1009,12 +794,6 @@ def run_for_point(lat: float, lon: float):
     df_final = pd.DataFrame(final_rows).pivot(index='Hazard', columns='Column', values='Score')
     cols = ['Observed_2024'] + [f'{s}_{e}' for s in ['Trend', 'ssp245', 'ssp585'] for e in EPOCHS]
     df_final = df_final[[c for c in cols if c in df_final.columns]].reset_index()
-    
-    # NaN diagnostic
-    nan_count = df_final.isna().sum().sum()
-    if nan_count > 0:
-        logging.warning(f"Final matrix contains {nan_count} NaN values")
-    
     matrix_time = time.time() - matrix_start
 
     total_time = time.time() - total_start
@@ -1022,9 +801,3 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
-
-
-
-
-
-
