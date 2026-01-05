@@ -1,5 +1,3 @@
-Look at the code from the perspective of Climate Risk Specialist of 20 years experience and find faults in logic 
-
 import ee
 import pandas as pd
 import numpy as np
@@ -893,3 +891,4 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
