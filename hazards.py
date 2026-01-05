@@ -957,12 +957,19 @@ def run_for_point(lat: float, lon: float):
                 mx = sdf['tasmax'].values
                 mn = sdf['tasmin'].values
                 av = sdf['tas'].values
+                # Mean warming signal (robust)
+                tmean_anom = np.mean(av) - cmip_tmean_base
+                # Hybrid SSP extremes
+                abs_tmax = obs_extreme_tmax + tmean_anom
+                abs_tmin = obs_extreme_tmin + tmean_anom
 
+                # Observed extreme reference (structure preserved)
+                obs_extreme_tmax = obs_window['temperature_2m_max'].quantile(0.99)
+                obs_extreme_tmin = obs_window['temperature_2m_min'].quantile(0.01)
                 # --- Precipitation remains bias-corrected ---
                 pr = perform_qm(era5_base, hist_cmip, sdf, 'pr', 'pr', 'pr')
                 abs_pr_max = np.max(pr)
-                abs_tmax = np.max(mx)
-                abs_tmin = np.min(mn)
+
                 # --- SSP TEMPERATURE ANOMALIES (MODEL SPACE) ---
                 tmax_anom = np.mean(mx) - cmip_tmax_base
                 tmean_anom = np.mean(av) - cmip_tmean_base
@@ -1015,6 +1022,7 @@ def run_for_point(lat: float, lon: float):
 
     df_final = df_final.replace([np.inf, -np.inf, np.nan], None)
     return df_final
+
 
 
 
